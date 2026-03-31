@@ -1,0 +1,11 @@
+# Ignore AWS Certificates
+certs/
+*.pem
+*.crt
+*.key
+
+# Ignore Python Cache
+__pycache__/
+
+# Ignore Local Test Data
+energy_log.csv
