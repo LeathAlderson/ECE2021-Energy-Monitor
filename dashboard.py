@@ -15,12 +15,16 @@ import tempfile
 import os
 
 # --- Secure Certificate Handling ---
-# Check if we are running on Streamlit Cloud (which uses st.secrets)
-if "aws" in st.secrets:
-    # Create a temporary, hidden folder on the cloud server
+# Safely check if secrets exist without crashing
+try:
+    has_aws_secrets = "aws" in st.secrets
+except Exception:
+    has_aws_secrets = False
+
+if has_aws_secrets:
+    # We are running on Streamlit Cloud
     temp_dir = Path(tempfile.mkdtemp())
     
-    # Write the secrets into temporary files so paho-mqtt can read them
     CA_PATH = temp_dir / "AmazonRootCA1.pem"
     CA_PATH.write_text(st.secrets["aws"]["root_ca"])
     
@@ -33,9 +37,8 @@ else:
     # We are running locally in Codespaces
     CERTS_DIR = Path("./certs")
     CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
-    CERT_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-certificate.pem.crt" # Update with your exact filename
-    KEY_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-private.pem.key"      # Update with your exact filename
-
+    CERT_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-certificate.pem.crt" 
+    KEY_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-private.pem.key"
 
 # --- Page Setup ---
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
