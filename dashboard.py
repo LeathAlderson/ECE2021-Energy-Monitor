@@ -11,10 +11,31 @@ AWS_ENDPOINT = "a2n8xb6p9d7o9i-ats.iot.us-east-2.amazonaws.com"
 CLIENT_ID = "Streamlit_Web_Dashboard"
 TOPIC = "ece2021/energy_data"
 
-CERTS_DIR = Path("C:/ECE2021/certs")
-CA_PATH   = CERTS_DIR / "AmazonRootCA1.pem"
-CERT_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-certificate.pem.crt"
-KEY_PATH  = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-private.pem.key"
+import tempfile
+import os
+
+# --- Secure Certificate Handling ---
+# Check if we are running on Streamlit Cloud (which uses st.secrets)
+if "aws" in st.secrets:
+    # Create a temporary, hidden folder on the cloud server
+    temp_dir = Path(tempfile.mkdtemp())
+    
+    # Write the secrets into temporary files so paho-mqtt can read them
+    CA_PATH = temp_dir / "AmazonRootCA1.pem"
+    CA_PATH.write_text(st.secrets["aws"]["root_ca"])
+    
+    CERT_PATH = temp_dir / "certificate.pem.crt"
+    CERT_PATH.write_text(st.secrets["aws"]["cert"])
+    
+    KEY_PATH = temp_dir / "private.pem.key"
+    KEY_PATH.write_text(st.secrets["aws"]["private_key"])
+else:
+    # We are running locally in Codespaces
+    CERTS_DIR = Path("./certs")
+    CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
+    CERT_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-certificate.pem.crt" # Update with your exact filename
+    KEY_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-private.pem.key"      # Update with your exact filename
+
 
 # --- Page Setup ---
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
