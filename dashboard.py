@@ -20,8 +20,8 @@ CERTS_DIR = BASE_DIR / "certs"
 
 CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
 # Fixed the double 'ff' typo here!
-CERT_PATH = CERTS_DIR / "c5ebb4459f6a3cb0303ae7b300e5215734a5484170cddf2dffe2c9bcc341520-certificate.pem.crt"
-KEY_PATH = CERTS_DIR / "c5ebb4459f6a3cb0303ae7b300e5215734a5484170cddf2dffe2c9bcc341520-private.pem.key"
+CERT_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-certificate.pem.crt"
+KEY_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-private.pem.key"
 
 # 2. Diagnostic Check - This will halt the app and show the error in the UI
 if not CA_PATH.exists():
@@ -33,7 +33,7 @@ if not CERT_PATH.exists():
 if not KEY_PATH.exists():
     st.error(f"Missing Private Key! Python is looking here: {KEY_PATH}")
     st.stop()
-    
+
 # --- Page Setup ---
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
