@@ -37,7 +37,7 @@ else:
     CERTS_DIR = BASE_DIR / "certs"
 
     # Using the exact filenames found on your local drive
-    CA_PATH = CERTS_DIR / "AmazonRootCA1,pem"
+    CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
     CERT_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-certificate.pem.crt"
     KEY_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-private.pem.key"
 
