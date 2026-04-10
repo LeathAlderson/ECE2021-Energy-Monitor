@@ -14,33 +14,26 @@ TOPIC = "ece2021/energy_data"
 import tempfile
 import os
 
-# --- Secure Certificate Handling ---
-# Safely check if secrets exist without crashing
-try:
-    has_aws_secrets = "aws" in st.secrets
-except Exception:
-    has_aws_secrets = False
 
-if has_aws_secrets:
-    # We are running on Streamlit Cloud
-    temp_dir = Path(tempfile.mkdtemp())
-    
-    CA_PATH = temp_dir / "AmazonRootCA1.pem"
-    CA_PATH.write_text(st.secrets["aws"]["root_ca"])
-    
-    CERT_PATH = temp_dir / "certificate.pem.crt"
-    CERT_PATH.write_text(st.secrets["aws"]["cert"])
-    
-    KEY_PATH = temp_dir / "private.pem.key"
-    KEY_PATH.write_text(st.secrets["aws"]["private_key"])
-else:
-    BASE_DIR = Path(__file__).parent.resolve()
-    # We are running locally in Codespaces
-    CERTS_DIR = Path("./certs")
-    CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
-    CERT_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-certificate.pem.crt" 
-    KEY_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-private.pem.key"
+BASE_DIR = Path(__file__).parent.resolve()
+CERTS_DIR = BASE_DIR / "certs"
 
+CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
+# Fixed the double 'ff' typo here!
+CERT_PATH = CERTS_DIR / "c5ebb4459f6a3cb0303ae7b300e5215734a5484170cddf2dffe2c9bcc341520-certificate.pem.crt"
+KEY_PATH = CERTS_DIR / "c5ebb4459f6a3cb0303ae7b300e5215734a5484170cddf2dffe2c9bcc341520-private.pem.key"
+
+# 2. Diagnostic Check - This will halt the app and show the error in the UI
+if not CA_PATH.exists():
+    st.error(f"Missing Root CA! Python is looking here: {CA_PATH}")
+    st.stop()
+if not CERT_PATH.exists():
+    st.error(f"Missing Certificate! Python is looking here: {CERT_PATH}")
+    st.stop()
+if not KEY_PATH.exists():
+    st.error(f"Missing Private Key! Python is looking here: {KEY_PATH}")
+    st.stop()
+    
 # --- Page Setup ---
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
