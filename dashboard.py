@@ -34,6 +34,7 @@ if has_aws_secrets:
     KEY_PATH = temp_dir / "private.pem.key"
     KEY_PATH.write_text(st.secrets["aws"]["private_key"])
 else:
+    BASE_DIR = Path(__file__).parent.resolve()
     # We are running locally in Codespaces
     CERTS_DIR = Path("./certs")
     CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
