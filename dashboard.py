@@ -76,9 +76,7 @@ def init_mqtt():
     client.tls_set(
         ca_certs=str(CA_PATH),
         certfile=str(CERT_PATH),
-        keyfile=str(KEY_PATH),
-        cert_reqs=ssl.CERT_REQUIRED,
-        tls_version=ssl.PROTOCOL_TLS_CLIENT
+        keyfile=str(KEY_PATH)
     )
     
     client.connect(AWS_ENDPOINT, 8883, 60)
