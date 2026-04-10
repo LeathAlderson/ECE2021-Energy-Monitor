@@ -31,9 +31,10 @@ if is_cloud_deployment:
     CERT_PATH = CERTS_DIR / "certificate.pem.crt"
     KEY_PATH = CERTS_DIR / "private.pem.key"
     
-    CA_PATH.write_text(st.secrets["aws"]["ca_cert"])
-    CERT_PATH.write_text(st.secrets["aws"]["cert"])
-    KEY_PATH.write_text(st.secrets["aws"]["private_key"])
+    # ADDED .strip() TO CLEAN UP INVISIBLE FORMATTING BUGS
+    CA_PATH.write_text(st.secrets["aws"]["ca_cert"].strip())
+    CERT_PATH.write_text(st.secrets["aws"]["cert"].strip())
+    KEY_PATH.write_text(st.secrets["aws"]["private_key"].strip())
     
 else:
     # 💻 LOCAL CODESPACES ENVIRONMENT
