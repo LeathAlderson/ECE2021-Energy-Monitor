@@ -8,6 +8,10 @@ import os
 from pathlib import Path
 
 # --- 1. Define Paths based on Environment ---
+# --- Configuration ---
+AWS_ENDPOINT = "a2n8xb6p9d7o9i-ats.iot.us-east-2.amazonaws.com"
+CLIENT_ID = "Streamlit_Web_Dashboard"
+TOPIC = "ece2021/energy_data"
 
 # Safely check if we are in the cloud with valid secrets
 is_cloud_deployment = False
