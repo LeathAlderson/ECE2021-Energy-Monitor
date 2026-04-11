@@ -112,10 +112,13 @@ def live_dashboard():
         st.write("---")
         st.subheader("📋 Raw System Logs")
         
-        # We use .sort_values() to flip the dataframe so the newest timestamp is at the very top
+        # Sort the logs newest to oldest
         sorted_logs = display_df[['timestamp', 'voltage', 'current', 'power', 'alerts']].sort_values(by='timestamp', ascending=False)
         
-        st.dataframe(sorted_logs, use_container_width=True, hide_index=True)
+        # Format the timestamp column to hide the +00:00 timezone block
+        sorted_logs['timestamp'] = sorted_logs['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        st.dataframe(sorted_logs, width='stretch', hide_index=True)
 
     else:
         st.info("Waiting for data in the database... Is your Pi sending data?")
