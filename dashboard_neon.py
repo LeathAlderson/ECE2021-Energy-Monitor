@@ -108,10 +108,14 @@ def live_dashboard():
             unsafe_allow_html=True
         )
 
-        # 7. RAW SYSTEM LOGS TABLE
+# 7. RAW SYSTEM LOGS TABLE
         st.write("---")
         st.subheader("📋 Raw System Logs")
-        st.dataframe(display_df[['timestamp', 'voltage', 'current', 'power', 'alerts']], use_container_width=True, hide_index=True)
+        
+        # We use .sort_values() to flip the dataframe so the newest timestamp is at the very top
+        sorted_logs = display_df[['timestamp', 'voltage', 'current', 'power', 'alerts']].sort_values(by='timestamp', ascending=False)
+        
+        st.dataframe(sorted_logs, use_container_width=True, hide_index=True)
 
     else:
         st.info("Waiting for data in the database... Is your Pi sending data?")
