@@ -1,3 +1,5 @@
 streamlit
 paho-mqtt
 pandas
+SQLAlchemy
+psycopg2-binary
