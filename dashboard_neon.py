@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import altair as alt  # NEW: For smooth, locked-axis charts
+import altair as alt
 
 # --- Page Setup ---
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
@@ -16,12 +16,12 @@ max_voltage = st.sidebar.number_input("Max Voltage Alert (V)", value=125.0, step
 conn = st.connection("neon", type="sql")
 
 # --- LIVE DASHBOARD FRAGMENT ---
-# @st.fragment isolates this block so ONLY this section updates every 2 seconds.
-# Your sidebar and the page background will no longer flash!
 @st.fragment(run_every=2)
 def live_dashboard():
     try:
-        live_df = conn.query('SELECT * FROM readings ORDER BY timestamp DESC LIMIT 100;', ttl="1s")
+        # UPDATED: Pull exactly the last 24 hours of data instead of a fixed limit
+        query = "SELECT * FROM readings WHERE timestamp >= NOW() - INTERVAL '24 hours' ORDER BY timestamp DESC;"
+        live_df = conn.query(query, ttl="2s")
     except Exception as e:
         st.error(f"Failed to connect or table doesn't exist: {e}")
         st.stop()
@@ -42,39 +42,89 @@ def live_dashboard():
         col2.metric("Live Current", f"{latest['current']:.2f} A")
         col3.metric("Live Power", f"{calc_power:.2f} W")
         
-        # 3. SMOOTH CHART (Altair)
-        st.subheader("Live Power Draw (Watts)")
+        st.write("---")
+        
+        # 3. TIME SLIDER CONTROL
+        st.subheader("Historical Data Explorer")
+        time_window = st.select_slider(
+            "Select Graph Time Window",
+            options=["5 Minutes", "15 Minutes", "30 Minutes", "1 Hour", "3 Hours", "6 Hours", "12 Hours", "24 Hours"],
+            value="15 Minutes"
+        )
+        
+        # Map the text selection to actual minutes
+        window_map = {
+            "5 Minutes": 5, "15 Minutes": 15, "30 Minutes": 30, "1 Hour": 60, 
+            "3 Hours": 180, "6 Hours": 360, "12 Hours": 720, "24 Hours": 1440
+        }
+        mins_back = window_map[time_window]
+
+        # 4. DATA PROCESSING & MATH
+        # Reverse to chronological order (oldest to newest)
         chart_df = live_df.iloc[::-1].copy()
         chart_df['power'] = chart_df['voltage'] * chart_df['current']
+        chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
         
-        # We lock the Y-axis from 0 to 20% higher than your max power threshold.
-        # This stops the line from wildly resizing when new data arrives!
-        smooth_chart = alt.Chart(chart_df).mark_line(color='#FF4B4B').encode(
-            x=alt.X('timestamp:T', title='Time'),
-            y=alt.Y('power:Q', title='Power (W)', scale=alt.Scale(domain=[0, max_power * 1.2]))
-        ).properties(height=350)
+        # Calculus: Accumulate Power over Time to get Energy (kWh)
+        chart_df['time_diff_hours'] = chart_df['timestamp'].diff().dt.total_seconds() / 3600.0
+        chart_df['time_diff_hours'] = chart_df['time_diff_hours'].fillna(0) # Handle the very first row
+        chart_df['energy_kwh'] = (chart_df['power'] * chart_df['time_diff_hours']).cumsum() / 1000.0
         
-        st.altair_chart(smooth_chart, use_container_width=True)
+        # Filter the dataframe down to just what the slider requested
+        cutoff_time = chart_df['timestamp'].max() - pd.Timedelta(minutes=mins_back)
+        display_df = chart_df[chart_df['timestamp'] >= cutoff_time]
 
-        # 4. LOGS & USAGE TABS
+        # 5. THE 2x2 GRAPH GRID
+        graph_col1, graph_col2 = st.columns(2)
+        
+        with graph_col1:
+            # VOLTAGE CHART (zero=False lets the Y-axis zoom in on 110-125V)
+            v_chart = alt.Chart(display_df).mark_line(color='#00b4d8').encode(
+                x=alt.X('timestamp:T', title='Time'),
+                y=alt.Y('voltage:Q', title='Voltage (V)', scale=alt.Scale(zero=False))
+            ).properties(height=250, title="Voltage")
+            st.altair_chart(v_chart, use_container_width=True)
+            
+            # POWER CHART (Locked to the Max Power threshold for visual scaling)
+            p_chart = alt.Chart(display_df).mark_line(color='#ff4b4b').encode(
+                x=alt.X('timestamp:T', title='Time'),
+                y=alt.Y('power:Q', title='Power (W)', scale=alt.Scale(domain=[0, max_power * 1.2]))
+            ).properties(height=250, title="Power Draw")
+            st.altair_chart(p_chart, use_container_width=True)
+            
+        with graph_col2:
+            # CURRENT CHART
+            c_chart = alt.Chart(display_df).mark_line(color='#fb8500').encode(
+                x=alt.X('timestamp:T', title='Time'),
+                y=alt.Y('current:Q', title='Current (A)', scale=alt.Scale(zero=False))
+            ).properties(height=250, title="Current")
+            st.altair_chart(c_chart, use_container_width=True)
+            
+            # TOTAL ENERGY CHART
+            e_chart = alt.Chart(display_df).mark_line(color='#023e8a').encode(
+                x=alt.X('timestamp:T', title='Time'),
+                y=alt.Y('energy_kwh:Q', title='Cumulative Energy (kWh)')
+            ).properties(height=250, title="Energy Consumed (Last 24h)")
+            st.altair_chart(e_chart, use_container_width=True)
+
+        # 6. LOGS & USAGE TABS
         st.write("---")
-        tab1, tab2 = st.tabs(["📊 Daily Usage Estimate", "📋 Raw System Logs"])
+        tab1, tab2 = st.tabs(["📊 Daily Usage", "📋 Raw System Logs"])
         
         with tab1:
             st.subheader("Energy Consumption")
-            st.info("This is an estimated rolling calculation based on recent average power draw.")
-            avg_power = chart_df['power'].mean()
-            estimated_kwh = (avg_power / 1000) * 24
-            st.metric("Estimated 24h Usage", f"{estimated_kwh:.2f} kWh")
+            st.info("This is the actual calculated energy consumed over the last 24 hours of recorded data.")
+            # Because we calculate cumulative energy, the very last row contains the grand total!
+            actual_24h_kwh = chart_df['energy_kwh'].max()
+            st.metric("Total 24h Usage", f"{actual_24h_kwh:.4f} kWh")
             
         with tab2:
             st.subheader("Recent Database Entries")
-            st.dataframe(chart_df[['timestamp', 'voltage', 'current', 'power']], use_container_width=True, hide_index=True)
+            # We display the filtered data so it matches the slider
+            st.dataframe(display_df[['timestamp', 'voltage', 'current', 'power', 'alerts']], use_container_width=True, hide_index=True)
 
     else:
         st.info("Waiting for data in the database... Is your Pi sending data?")
 
 # --- Run the Fragment ---
 live_dashboard()
-
-# Notice: You no longer need time.sleep() or st.rerun() down here!
