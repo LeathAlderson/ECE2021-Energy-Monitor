@@ -67,8 +67,20 @@ if not live_df.empty:
     with alert_col:
         st.subheader("🚨 Recent Alerts")
         if not alerts_df.empty:
-            # Displaying only the timestamp and the string as requested
-            st.table(alerts_df[['time_stamp', 'description']])
+            # 1. Convert to datetime
+            alerts_df['time_stamp'] = pd.to_datetime(alerts_df['time_stamp'])
+            
+            # 2. Format to string and remove the +00:00 (timezone offset)
+            # This makes it '2026-04-11 17:15:01'
+            alerts_df['time_stamp'] = alerts_df['time_stamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # 3. Filter to JUST the alert and the time, then rename for the UI
+            display_alerts = alerts_df[['description', 'time_stamp']].rename(
+                columns={'description': 'Alert Message', 'time_stamp': 'Time Detected'}
+            )
+            
+            # Display as a clean table
+            st.table(display_alerts)
         else:
             st.success("No alerts reported in the system.")
 
