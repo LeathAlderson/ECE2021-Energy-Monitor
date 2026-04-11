@@ -6,12 +6,6 @@ import altair as alt
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
 
-# --- Threshold Settings (Sidebar) ---
-st.sidebar.header("⚙️ Alert Settings")
-st.sidebar.write("Adjust thresholds to trigger dashboard alerts:")
-max_power = st.sidebar.number_input("Max Power Alert (W)", value=600.0, step=50.0)
-max_voltage = st.sidebar.number_input("Max Voltage Alert (V)", value=125.0, step=1.0)
-
 # --- Neon Database Connection ---
 conn = st.connection("neon", type="sql")
 
@@ -29,11 +23,13 @@ def live_dashboard():
         latest = live_df.iloc[0]
         calc_power = latest['voltage'] * latest['current']
 
-        # 1. LIVE ALERTS
-        if calc_power > max_power:
-            st.error(f"🚨 ALERT: Power exceeded limit! Currently drawing {calc_power:.2f} W")
-        if latest['voltage'] > max_voltage:
-            st.warning(f"⚠️ WARNING: Voltage is unusually high: {latest['voltage']:.2f} V")
+        # 1. DATABASE-DRIVEN ALERTS
+        # We grab the 'alerts' column from the newest row in the database
+        db_alert = latest.get('alerts', 'Normal')
+        
+        # If it's not empty, not "Normal", and not a missing NaN value, flash the warning!
+        if pd.notna(db_alert) and str(db_alert).strip() not in ["", "Normal", "None"]:
+            st.error(f"🚨 SYSTEM ALERT: {db_alert}")
 
         # 2. LIVE METRICS
         col1, col2, col3 = st.columns(3)
@@ -79,9 +75,10 @@ def live_dashboard():
             ).properties(height=250, title="Voltage")
             st.altair_chart(v_chart, use_container_width=True)
             
+            # Since we removed the slider, the Power chart will now auto-scale to fit the data
             p_chart = alt.Chart(display_df).mark_line(color='#ff4b4b').encode(
                 x=alt.X('timestamp:T', title='Time'),
-                y=alt.Y('power:Q', title='Power (W)', scale=alt.Scale(domain=[0, max_power * 1.2]))
+                y=alt.Y('power:Q', title='Power (W)', scale=alt.Scale(zero=True))
             ).properties(height=250, title="Power Draw")
             st.altair_chart(p_chart, use_container_width=True)
             
@@ -98,7 +95,7 @@ def live_dashboard():
             ).properties(height=250, title="Energy Consumed")
             st.altair_chart(e_chart, use_container_width=True)
 
-        # 6. LARGE ENERGY DISPLAY (Replaced the tabs!)
+        # 6. LARGE ENERGY DISPLAY
         st.write("---")
         actual_24h_kwh = chart_df['energy_kwh'].max()
         st.markdown(
