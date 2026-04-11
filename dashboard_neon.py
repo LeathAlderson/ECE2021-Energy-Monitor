@@ -11,22 +11,35 @@ st.title("⚡ Live Energy Monitor Dashboard")
 conn = st.connection("neon", type="sql")
 
 try:
-    query = "SELECT * FROM readings WHERE timestamp >= NOW() - INTERVAL '24 hours' ORDER BY timestamp DESC;"
-    live_df = conn.query(query, ttl="2s")
+    # 1. Pull Telemetry (Readings)
+    query_readings = "SELECT * FROM readings WHERE timestamp >= NOW() - INTERVAL '24 hours' ORDER BY timestamp DESC;"
+    live_df = conn.query(query_readings, ttl="0s") # Set ttl to 0 for live data
+
+    # 2. Pull the Single Latest Alert from the dedicated table
+    query_alerts = "SELECT * FROM alerts ORDER BY time_stamp DESC LIMIT 1;"
+    latest_alert_df = conn.query(query_alerts, ttl="0s")
 except Exception as e:
-    st.error(f"Failed to connect or table doesn't exist: {e}")
+    st.error(f"Failed to connect to Neon: {e}")
     st.stop()
 
 if not live_df.empty:
     latest = live_df.iloc[0]
+    
+    # --- 1. SEPARATE TABLE ALERT LOGIC ---
+    if not latest_alert_df.empty:
+        alert_row = latest_alert_df.iloc[0]
+        alert_time = pd.to_datetime(alert_row['time_stamp'])
+        
+        # Only show the red alert bar if the alert happened in the last 60 seconds
+        time_since_alert = (pd.Timestamp.now(tz='UTC') - alert_time).total_seconds()
+        
+        if time_since_alert < 60:
+            st.error(f"🚨 SYSTEM ALERT: {alert_row['description']} (Detected {int(time_since_alert)}s ago)")
+
+    # --- 2. LIVE METRICS ---
+    # Using the columns from your 'readings' table screenshot
     calc_power = latest['voltage'] * latest['current']
 
-    # 1. DATABASE-DRIVEN ALERTS
-    db_alert = latest.get('alerts', 'Normal')
-    if pd.notna(db_alert) and str(db_alert).strip() not in ["", "Normal", "None"]:
-        st.error(f"🚨 SYSTEM ALERT: {db_alert}")
-
-    # 2. LIVE METRICS
     col1, col2, col3 = st.columns(3)
     col1.metric("Live Voltage", f"{latest['voltage']:.2f} V")
     col2.metric("Live Current", f"{latest['current']:.2f} A")
@@ -34,138 +47,72 @@ if not live_df.empty:
     
     st.write("---")
     
-   # 3. TIME BUTTON CONTROL
-    st.subheader("Historical Data Explorer")
-    
-    # Give the app a memory so it doesn't forget your choice
+    # --- 3. TIME WINDOW CONTROLS ---
     if 'time_window' not in st.session_state:
         st.session_state.time_window = "15 Minutes"
         
-    # THE FIX: This function runs instantly when a button is clicked, 
-    # updating the memory BEFORE Streamlit draws the colors.
     def set_window(selected_window):
         st.session_state.time_window = selected_window
             
     options = ["5 Minutes", "15 Minutes", "30 Minutes", "1 Hour", "3 Hours", "6 Hours", "12 Hours", "24 Hours"]
-    
     cols = st.columns(len(options))
     
     for i, opt in enumerate(options):
-        btn_color = "primary" if st.session_state.time_window == opt else "secondary"
-        
-        # We use 'on_click' and 'args' to trigger the callback function
-        cols[i].button(
-            opt, 
-            type=btn_color, 
-            use_container_width=True, 
-            on_click=set_window, 
-            args=(opt,),
-            key=f"btn_{opt}"  # Streamlit prefers buttons with identical names to have unique keys
-        )
-            
-    # Pull the current choice out of memory for the math below
-    time_window = st.session_state.time_window
+        btn_type = "primary" if st.session_state.time_window == opt else "secondary"
+        cols[i].button(opt, type=btn_type, use_container_width=True, on_click=set_window, args=(opt,), key=f"btn_{opt}")
+
+    # Map window selection to minutes
+    window_map = {"5 Minutes": 5, "15 Minutes": 15, "30 Minutes": 30, "1 Hour": 60, "3 Hours": 180, "6 Hours": 360, "12 Hours": 720, "24 Hours": 1440}
+    mins_back = window_map[st.session_state.time_window]
     
-    window_map = {
-        "5 Minutes": 5, "15 Minutes": 15, "30 Minutes": 30, "1 Hour": 60, 
-        "3 Hours": 180, "6 Hours": 360, "12 Hours": 720, "24 Hours": 1440
-    }
-    mins_back = window_map[time_window]
-    
-    # 4. DATA PROCESSING & MATH
-    chart_df = live_df.iloc[::-1].copy()
+    # --- 4. DATA PROCESSING ---
+    chart_df = live_df.iloc[::-1].copy() # Reverse to chronological order
     chart_df['power'] = chart_df['voltage'] * chart_df['current']
     chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
     
+    # Calculate energy delta based on time between rows
     chart_df['time_diff_hours'] = chart_df['timestamp'].diff().dt.total_seconds() / 3600.0
-    chart_df['time_diff_hours'] = chart_df['time_diff_hours'].fillna(0)
-    
-    # Energy and Cost Calculus
-    chart_df['energy_kwh'] = (chart_df['power'] * chart_df['time_diff_hours']).cumsum() / 1000.0
-    chart_df['cost_usd'] = chart_df['energy_kwh'] * 0.1521  # 15.21 cents per kWh
+    chart_df['energy_kwh'] = (chart_df['power'] * chart_df['time_diff_hours'].fillna(0)).cumsum() / 1000.0
+    chart_df['cost_usd'] = chart_df['energy_kwh'] * 0.1521 
     
     cutoff_time = chart_df['timestamp'].max() - pd.Timedelta(minutes=mins_back)
     display_df = chart_df[chart_df['timestamp'] >= cutoff_time]
 
-    # 5. THE GRAPH GRID
-    graph_col1, graph_col2 = st.columns(2)
-    
-    with graph_col1:
-        v_chart = alt.Chart(display_df).mark_line(color='#00b4d8').encode(
-            x=alt.X('timestamp:T', title='Time'),
-            y=alt.Y('voltage:Q', title='Voltage (V)', scale=alt.Scale(zero=False))
-        ).properties(height=250, title="Voltage")
-        st.altair_chart(v_chart, use_container_width=True)
+    # --- 5. GRAPHS ---
+    g1, g2 = st.columns(2)
+    with g1:
+        st.altair_chart(alt.Chart(display_df).mark_line(color='#00b4d8').encode(
+            x='timestamp:T', y=alt.Y('voltage:Q', scale=alt.Scale(zero=False))).properties(title="Voltage (V)", height=250), use_container_width=True)
         
-        p_chart = alt.Chart(display_df).mark_line(color='#ff4b4b').encode(
-            x=alt.X('timestamp:T', title='Time'),
-            y=alt.Y('power:Q', title='Power (W)', scale=alt.Scale(zero=True))
-        ).properties(height=250, title="Power Draw")
-        st.altair_chart(p_chart, use_container_width=True)
+        st.altair_chart(alt.Chart(display_df).mark_line(color='#ff4b4b').encode(
+            x='timestamp:T', y='power:Q').properties(title="Power (W)", height=250), use_container_width=True)
         
-    with graph_col2:
-        c_chart = alt.Chart(display_df).mark_line(color='#fb8500').encode(
-            x=alt.X('timestamp:T', title='Time'),
-            y=alt.Y('current:Q', title='Current (A)', scale=alt.Scale(zero=False))
-        ).properties(height=250, title="Current")
-        st.altair_chart(c_chart, use_container_width=True)
+    with g2:
+        st.altair_chart(alt.Chart(display_df).mark_line(color='#fb8500').encode(
+            x='timestamp:T', y=alt.Y('current:Q', scale=alt.Scale(zero=False))).properties(title="Current (A)", height=250), use_container_width=True)
         
-        e_chart = alt.Chart(display_df).mark_line(color='#023e8a').encode(
-            x=alt.X('timestamp:T', title='Time'),
-            y=alt.Y('energy_kwh:Q', title='Cumulative Energy (kWh)')
-        ).properties(height=250, title="Energy Consumed")
-        st.altair_chart(e_chart, use_container_width=True)
+        st.altair_chart(alt.Chart(display_df).mark_line(color='#023e8a').encode(
+            x='timestamp:T', y='energy_kwh:Q').properties(title="Cumulative Energy (kWh)", height=250), use_container_width=True)
 
-    # THE NEW COST GRAPH (Full Width)
-    usd_chart = alt.Chart(display_df).mark_area(
-        color='#2a9d8f', opacity=0.3, line={'color': '#2a9d8f'}
-    ).encode(
-        x=alt.X('timestamp:T', title='Time'),
-        y=alt.Y('cost_usd:Q', title='Cost ($)')
-    ).properties(height=200, title="Cumulative Cost Estimate")
-    st.altair_chart(usd_chart, use_container_width=True)
+    # Cost Area Chart
+    st.altair_chart(alt.Chart(display_df).mark_area(color='#2a9d8f', opacity=0.3).encode(
+        x='timestamp:T', y='cost_usd:Q').properties(title="Cumulative Cost ($)", height=200), use_container_width=True)
 
-    # 6. LARGE DUAL METRICS DISPLAY
+    # --- 6. SUMMARY METRICS ---
     st.write("---")
-    actual_24h_kwh = chart_df['energy_kwh'].max()
-    actual_24h_cost = chart_df['cost_usd'].max()
-    
-    metric_col1, metric_col2 = st.columns(2)
-    
-    with metric_col1:
-        st.markdown(
-            f"""
-            <div style="text-align: center; padding: 20px; background-color: rgba(2, 62, 138, 0.1); border-radius: 10px;">
-                <h3 style="margin-bottom: 0px;">Energy Consumed (Last 24h)</h3>
-                <h1 style="color: #023e8a; font-size: 3rem; margin-top: 10px;">{actual_24h_kwh:.4f} kWh</h1>
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
-        
-    with metric_col2:
-        st.markdown(
-            f"""
-            <div style="text-align: center; padding: 20px; background-color: rgba(42, 157, 143, 0.1); border-radius: 10px;">
-                <h3 style="margin-bottom: 0px;">Operating Cost (Last 24h @ 15.21¢/KWh)</h3>
-                <h1 style="color: #2a9d8f; font-size: 3rem; margin-top: 10px;">${actual_24h_cost:.4f}</h1>
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
+    m1, m2 = st.columns(2)
+    m1.metric("Total Energy (24h)", f"{chart_df['energy_kwh'].max():.4f} kWh")
+    m2.metric("Total Cost (24h)", f"${chart_df['cost_usd'].max():.4f}")
 
-    # 7. RAW SYSTEM LOGS TABLE
+    # --- 7. RAW LOGS ---
     st.write("---")
     st.subheader("📋 Raw System Logs")
-    
-    sorted_logs = display_df[['timestamp', 'voltage', 'current', 'power', 'alerts']].sort_values(by='timestamp', ascending=False)
-    sorted_logs['timestamp'] = sorted_logs['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-    
-    st.dataframe(sorted_logs, use_container_width=True, hide_index=True)
+    log_display = display_df[['timestamp', 'voltage', 'current', 'power']].sort_values(by='timestamp', ascending=False)
+    st.dataframe(log_display, use_container_width=True, hide_index=True)
 
 else:
-    st.info("Waiting for data in the database... Is your Pi sending data?")
+    st.info("No data found in 'readings' table. Please check your backend connection.")
 
-# Refresh the page every 2 seconds
+# Auto-refresh logic
 time.sleep(2)
 st.rerun()
