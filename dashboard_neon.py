@@ -34,19 +34,34 @@ if not live_df.empty:
     
     st.write("---")
     
-    # 3. TIME SLIDER CONTROL
-    st.subheader("Historical Data Explorer")
-    time_window = st.select_slider(
-        "Select Graph Time Window",
-        options=["5 Minutes", "15 Minutes", "30 Minutes", "1 Hour", "3 Hours", "6 Hours", "12 Hours", "24 Hours"],
-        value="15 Minutes"
-    )
-    
-    window_map = {
-        "5 Minutes": 5, "15 Minutes": 15, "30 Minutes": 30, "1 Hour": 60, 
-        "3 Hours": 180, "6 Hours": 360, "12 Hours": 720, "24 Hours": 1440
-    }
-    mins_back = window_map[time_window]
+    # 3. TIME BUTTON CONTROL
+        st.subheader("Historical Data Explorer")
+        
+        # Give the app a memory so it doesn't forget your choice every 2 seconds
+        if 'time_window' not in st.session_state:
+            st.session_state.time_window = "15 Minutes"
+            
+        options = ["5 Minutes", "15 Minutes", "30 Minutes", "1 Hour", "3 Hours", "6 Hours", "12 Hours", "24 Hours"]
+        
+        # Create a row of exactly 8 equally spaced columns
+        cols = st.columns(len(options))
+        
+        for i, opt in enumerate(options):
+            # If this is the active choice, make it "primary" (colored). Otherwise, "secondary" (grey).
+            btn_color = "primary" if st.session_state.time_window == opt else "secondary"
+            
+            # Draw the button. If someone clicks it, update the memory!
+            if cols[i].button(opt, type=btn_color, use_container_width=True):
+                st.session_state.time_window = opt
+                
+        # Pull the current choice out of memory for the math below
+        time_window = st.session_state.time_window
+        
+        window_map = {
+            "5 Minutes": 5, "15 Minutes": 15, "30 Minutes": 30, "1 Hour": 60, 
+            "3 Hours": 180, "6 Hours": 360, "12 Hours": 720, "24 Hours": 1440
+        }
+        mins_back = window_map[time_window]
 
     # 4. DATA PROCESSING & MATH
     chart_df = live_df.iloc[::-1].copy()
