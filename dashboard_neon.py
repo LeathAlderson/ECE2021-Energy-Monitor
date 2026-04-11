@@ -123,7 +123,7 @@ if not live_df.empty:
         st.markdown(
             f"""
             <div style="text-align: center; padding: 20px; background-color: rgba(42, 157, 143, 0.1); border-radius: 10px;">
-                <h3 style="margin-bottom: 0px;">Operating Cost (Last 24h)</h3>
+                <h3 style="margin-bottom: 0px;">Operating Cost (Last 24h @ 15.21¢/KWh)</h3>
                 <h1 style="color: #2a9d8f; font-size: 3rem; margin-top: 10px;">${actual_24h_cost:.4f}</h1>
             </div>
             """, 
