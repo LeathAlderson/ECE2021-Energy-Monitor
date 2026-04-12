@@ -123,6 +123,31 @@ if not live_df.empty and not financials_df.empty:
         else:
             st.success("No alerts found in the database.")
 
+    # --- 7. EXPORT / DOWNLOAD SECTION ---
+    st.write("---")
+    st.subheader("📥 Export 24h Data")
+    dl_col1, dl_col2 = st.columns(2)
+    
+    with dl_col1:
+        telemetry_csv = live_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Telemetry (V, A, W) CSV", 
+            data=telemetry_csv, 
+            file_name=f"telemetry_data_{time.strftime('%Y%m%d_%H%M%S')}.csv", 
+            mime='text/csv',
+            use_container_width=True
+        )
+        
+    with dl_col2:
+        financials_csv = financials_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Financials (Cost, Rate) CSV", 
+            data=financials_csv, 
+            file_name=f"financial_data_{time.strftime('%Y%m%d_%H%M%S')}.csv", 
+            mime='text/csv',
+            use_container_width=True
+        )
+
 else:
     st.info("Waiting for data in the 'readings' and 'financials' tables...")
 
