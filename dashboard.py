@@ -35,7 +35,7 @@ for i, key in enumerate(WINDOWS.keys()):
 selected = st.session_state.time_window
 window = WINDOWS[selected]
 
-# ---------------- DATA FETCH (FAST) ----------------
+# ---------------- DATA FETCH ----------------
 try:
     readings = conn.query(f"""
         SELECT timestamp, voltage, current, power, total_energy
@@ -77,41 +77,28 @@ readings["timestamp"] = pd.to_datetime(readings["timestamp"])
 alerts["time_stamp"] = pd.to_datetime(alerts["time_stamp"])
 latest = latest.iloc[0]
 
-# ---------------- GAP DETECTION (5s RULE) ----------------
+# ---------------- GAP HANDLING ----------------
 readings = readings.sort_values("timestamp")
 
 gap_threshold = pd.Timedelta(seconds=5)
-diff = readings["timestamp"].diff()
+gap = readings["timestamp"].diff() > gap_threshold
 
-# insert NaNs where gap exists (break line)
-broken_rows = []
+nan_rows = pd.DataFrame({
+    "timestamp": np.where(gap, readings["timestamp"], np.nan),
+    "voltage": np.nan,
+    "current": np.nan,
+    "power": np.nan,
+    "total_energy": np.nan
+})
 
-for i in range(len(readings)):
-    if i > 0 and diff.iloc[i] > gap_threshold:
-        broken_rows.append({
-            "timestamp": readings.iloc[i]["timestamp"],
-            "voltage": np.nan,
-            "current": np.nan,
-            "power": np.nan,
-            "total_energy": np.nan
-        })
-    broken_rows.append(readings.iloc[i].to_dict())
+readings = pd.concat([readings, nan_rows], ignore_index=True)
+readings = readings.sort_values("timestamp")
 
-readings = pd.DataFrame(broken_rows)
+# ---------------- DAILY ----------------
+daily_energy = float(daily.iloc[0]["total_energy"] or 0)
+daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
 
-# ---------------- SMART TIME FORMAT ----------------
-def axis_format(window_key):
-    return {
-        "5m": "%H:%M:%S",
-        "15m": "%H:%M:%S",
-        "1h": "%H:%M",
-        "6h": "%H:%M",
-        "24h": "%Y/%m/%d"
-    }[window_key]
-
-fmt = axis_format(selected)
-
-# ---------------- LIVE METRICS ----------------
+# ---------------- METRICS ----------------
 c1, c2, c3 = st.columns(3)
 c1.metric("Voltage", f"{latest['voltage']:.2f} V")
 c2.metric("Current", f"{latest['current']:.2f} A")
@@ -119,14 +106,11 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# ---------------- CHART CORE (NO INTERACTION JUNK) ----------------
+# ---------------- CHART ----------------
 def make_chart(df, col, title, color):
 
     base = alt.Chart(df).encode(
-        x=alt.X(
-            "timestamp:T",
-            axis=alt.Axis(title=None, format=fmt)
-        ),
+        x=alt.X("timestamp:T", axis=alt.Axis(title=None, format="%H:%M:%S")),
         y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
     )
 
@@ -140,26 +124,20 @@ def make_chart(df, col, title, color):
     )
 
     selectors = base.mark_point(opacity=0).add_params(nearest)
-
     crosshair = base.mark_rule(color="gray").encode(
         opacity=alt.condition(nearest, alt.value(0.6), alt.value(0))
     )
 
     points = base.mark_point(size=60, color=color).transform_filter(nearest)
 
-    tooltip = base.mark_text(
-        dx=10,
-        dy=-10
-    ).encode(
+    tooltip = base.mark_text(dx=10, dy=-10).encode(
         text=alt.condition(nearest, alt.Text(f"{col}:Q", format=".2f"), alt.value(""))
     )
 
-    chart = (line + selectors + crosshair + points + tooltip).properties(
+    return (line + selectors + crosshair + points + tooltip).properties(
         height=240,
         title=title
     )
-
-    return chart
 
 # ---------------- GRAPHS ----------------
 g1, g2 = st.columns(2)
@@ -174,9 +152,6 @@ with g2:
 
 # ---------------- DAILY ----------------
 st.write("---")
-
-daily_energy = float(daily.iloc[0]["total_energy"] or 0)
-daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
 
 m1, m2 = st.columns(2)
 
@@ -198,22 +173,16 @@ m2.markdown(f"""
 st.write("---")
 st.subheader("🚨 Alerts")
 
-alert_rows = []
-for _, row in alerts.iterrows():
-    t = row["time_stamp"].strftime("%Y/%m/%d %H:%M:%S")
-    msg = row["description"][:80]
-    alert_rows.append([f"{t} — {msg}"])
+alert_rows = [
+    [f"{r['time_stamp'].strftime('%Y/%m/%d %H:%M:%S')} — {r['description'][:80]}"]
+    for _, r in alerts.iterrows()
+]
 
 alerts_df = pd.DataFrame(alert_rows, columns=["Alert"])
 
-st.dataframe(
-    alerts_df,
-    use_container_width=True,
-    height=180,
-    hide_index=True
-)
+st.dataframe(alerts_df, use_container_width=True, height=180, hide_index=True)
 
-# ---------------- DOWNLOAD (KEPT) ----------------
+# ---------------- DOWNLOAD ----------------
 st.write("---")
 st.subheader("📥 Download Data (24h)")
 
@@ -231,6 +200,6 @@ st.download_button(
     "text/csv"
 )
 
-# ---------------- FAST REFRESH ----------------
+# ---------------- REFRESH ----------------
 time.sleep(1)
 st.rerun()
