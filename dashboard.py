@@ -166,19 +166,9 @@ for _, row in alerts.iterrows():
 
     st.markdown(
         f"""
-        <div style="
-            display:flex;
-            justify-content:space-between;
-            padding:6px 8px;
-            margin-bottom:6px;
-            border-radius:6px;
-            background:rgba(255,255,255,0.03);
-            font-size:13px;
-        ">
-            <span style="color:gray">{t}</span>
-            <span>{msg}</span>
-        </div>
-        """,
+        <div style='font-size:13px;'>" 
+        f"<span style='color:gray'>{t}</span> — {msg}" 
+        f"</div>""",
         unsafe_allow_html=True
     )
 
