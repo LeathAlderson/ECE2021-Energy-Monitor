@@ -22,14 +22,6 @@ WINDOWS = {
     "24h": "24 hours"
 }
 
-WINDOW_SECONDS = {
-    "5m": 300,
-    "15m": 900,
-    "1h": 3600,
-    "6h": 21600,
-    "24h": 86400
-}
-
 # ---------------- TIME BUTTONS ----------------
 cols = st.columns(len(WINDOWS))
 
@@ -42,7 +34,7 @@ for i, key in enumerate(WINDOWS.keys()):
 selected = st.session_state.time_window
 window = WINDOWS[selected]
 
-# ---------------- DATA FETCH (RAW ONLY, NO AGGREGATION) ----------------
+# ---------------- DATA FETCH ----------------
 try:
     readings = conn.query(f"""
         SELECT timestamp, voltage, current, power, total_energy
@@ -59,7 +51,7 @@ try:
     """, ttl=1)
 
     alerts = conn.query("""
-        SELECT id, description, time_stamp
+        SELECT description, time_stamp
         FROM public.alerts
         ORDER BY time_stamp DESC
         LIMIT 50;
@@ -99,7 +91,6 @@ def make_chart(df, col, title, color):
         y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
     ).properties(height=240, title=title)
 
-# ---------------- GRAPHS ----------------
 g1, g2 = st.columns(2)
 
 with g1:
@@ -142,37 +133,30 @@ m2.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- ALERTS (FIXED SCROLL PANEL) ----------------
+# ---------------- ALERTS (FIXED TABLE STYLE) ----------------
 st.write("---")
 st.subheader("🚨 Alerts")
 
-st.markdown("""
-<div style="
-    max-height:180px;
-    overflow-y:auto;
-    border:1px solid rgba(255,255,255,0.08);
-    border-radius:10px;
-    padding:8px;
-    background:rgba(255,255,255,0.02);
-">
-""", unsafe_allow_html=True)
+# build clean display strings
+alert_rows = []
 
 for _, row in alerts.iterrows():
-    msg = row["description"]
-    if len(msg) > 60:
-        msg = msg[:60] + "..."
-
     t = row["time_stamp"].strftime("%H:%M:%S")
+    msg = row["description"]
 
-    st.markdown(
-        f"""
-        <div style='font-size:13px;'>" 
-        f"<span style='color:gray'>{t}</span> — {msg}" 
-        f"</div>""",
-        unsafe_allow_html=True
-    )
+    if len(msg) > 80:
+        msg = msg[:80] + "..."
 
-st.markdown("</div>", unsafe_allow_html=True)
+    alert_rows.append([f"{t} — {msg}"])
+
+alerts_df = pd.DataFrame(alert_rows, columns=["Alert"])
+
+st.dataframe(
+    alerts_df,
+    use_container_width=True,
+    height=180,   # <-- THIS is your scroll container fix
+    hide_index=True
+)
 
 # ---------------- DOWNLOAD ----------------
 st.write("---")
