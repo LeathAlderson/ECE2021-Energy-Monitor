@@ -1,131 +1,131 @@
 import streamlit as st
-import paho.mqtt.client as mqtt
-import json
 import pandas as pd
+import altair as alt
 import time
-import tempfile
-import os
-from pathlib import Path
 
-# --- 1. Define Paths based on Environment ---
-# --- Configuration ---
-AWS_ENDPOINT = "a2n8xb6p9d7o9i-ats.iot.us-east-2.amazonaws.com"
-CLIENT_ID = "Streamlit_Web_Dashboard"
-TOPIC = "ece2021/energy_data"
-
-# Safely check if we are in the cloud with valid secrets
-is_cloud_deployment = False
-try:
-    if "aws" in st.secrets:
-        is_cloud_deployment = True
-except Exception:
-    # If secrets don't exist at all (like in Codespaces), it safely falls down here
-    pass
-
-if is_cloud_deployment:
-    # ☁️ STREAMLIT CLOUD ENVIRONMENT
-    temp_dir = tempfile.mkdtemp()
-    CERTS_DIR = Path(temp_dir)
-    
-    CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
-    CERT_PATH = CERTS_DIR / "certificate.pem.crt"
-    KEY_PATH = CERTS_DIR / "private.pem.key"
-    
-    # ADDED .strip() TO CLEAN UP INVISIBLE FORMATTING BUGS
-    CA_PATH.write_text(st.secrets["aws"]["ca_cert"].strip())
-    CERT_PATH.write_text(st.secrets["aws"]["cert"].strip())
-    KEY_PATH.write_text(st.secrets["aws"]["private_key"].strip())
-    
-else:
-    # 💻 LOCAL CODESPACES ENVIRONMENT
-    BASE_DIR = Path(__file__).parent.resolve()
-    CERTS_DIR = BASE_DIR / "certs"
-
-    # Using the exact filenames found on your local drive
-    CA_PATH = CERTS_DIR / "AmazonRootCA1.pem"
-    CERT_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-certificate.pem.crt"
-    KEY_PATH = CERTS_DIR / "c5ebb4459ff6a3cb0303ae7b300e5215734a5a84170cddf2dffe2c98cc341520-private.pem.key"
-
-# --- 2. Diagnostic Check ---
-if not CA_PATH.exists():
-    st.error(f"Missing Root CA! Python is looking here: {CA_PATH}")
-    st.stop()
-if not CERT_PATH.exists():
-    st.error(f"Missing Certificate! Python is looking here: {CERT_PATH}")
-    st.stop()
-if not KEY_PATH.exists():
-    st.error(f"Missing Private Key! Python is looking here: {KEY_PATH}")
-    st.stop()
-
-# (The rest of your init_mqtt() and Streamlit code stays exactly the same)
 # --- Page Setup ---
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
 
-# FIX: Create a standard Python list that survives page refreshes
-@st.cache_resource
-def get_data_buffer():
-    return []
+# --- Neon Database Connection ---
+conn = st.connection("neon", type="sql")
 
-# This is our shared "box" that both threads can talk to safely
-data_buffer = get_data_buffer()
+try:
+    # Pull from all three tables (using TTL=0s to ensure live data)
+    live_df = conn.query("SELECT * FROM readings WHERE timestamp >= NOW() - INTERVAL '24 hours' ORDER BY timestamp DESC;", ttl="0s")
+    financials_df = conn.query("SELECT * FROM financials WHERE timestamp >= NOW() - INTERVAL '24 hours' ORDER BY timestamp DESC;", ttl="0s")
+    all_alerts_df = conn.query("SELECT * FROM alerts ORDER BY time_stamp DESC;", ttl="0s")
+except Exception as e:
+    st.error(f"Database Connection Error: {e}")
+    st.stop()
 
-# --- MQTT Connection ---
-@st.cache_resource
-def init_mqtt():
-    def on_connect(client, userdata, flags, reason_code, properties):
-        if reason_code == 0:
-            client.subscribe(TOPIC)
-            print("Dashboard connected to AWS and listening!")
+if not live_df.empty and not financials_df.empty:
+    latest_reading = live_df.iloc[0]
+    latest_finance = financials_df.iloc[0]
+    
+    # --- 1. LIVE METRICS ---
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Live Voltage", f"{latest_reading['voltage']:.2f} V")
+    c2.metric("Live Current", f"{latest_reading['current']:.2f} A")
+    c3.metric("Live Power", f"{latest_reading['power']:.2f} W")
 
-    def on_message(client, userdata, msg):
-        payload = json.loads(msg.payload.decode())
+    st.write("---")
+
+    # --- 2. TIME WINDOW CONTROLS ---
+    if 'time_window' not in st.session_state:
+        st.session_state.time_window = "15 Minutes"
         
-        # FIX: Append to the shared buffer instead of session_state
-        data_buffer.append(payload)
+    def set_window(selected_window):
+        st.session_state.time_window = selected_window
+            
+    options = ["5 Minutes", "15 Minutes", "1 Hour", "6 Hours", "24 Hours"]
+    cols = st.columns(len(options))
+    for i, opt in enumerate(options):
+        btn_color = "primary" if st.session_state.time_window == opt else "secondary"
+        cols[i].button(opt, type=btn_color, use_container_width=True, on_click=set_window, args=(opt,), key=f"btn_{opt}")
+
+    # --- 3. DATA PREP ---
+    # Reverse order for chronological graphing
+    chart_df = live_df.iloc[::-1].copy()
+    chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
+    
+    finance_chart_df = financials_df.iloc[::-1].copy()
+    finance_chart_df['timestamp'] = pd.to_datetime(finance_chart_df['timestamp'])
+    
+    window_map = {"5 Minutes": 5, "15 Minutes": 15, "1 Hour": 60, "6 Hours": 360, "24 Hours": 1440}
+    mins_back = window_map[st.session_state.time_window]
+    
+    # Filter datasets by selected time window
+    cutoff_time = chart_df['timestamp'].max() - pd.Timedelta(minutes=mins_back)
+    display_df = chart_df[chart_df['timestamp'] >= cutoff_time]
+    display_finance_df = finance_chart_df[finance_chart_df['timestamp'] >= cutoff_time]
+
+    # --- 4. THE GRAPH GRID ---
+    g1, g2 = st.columns(2)
+    with g1:
+        st.altair_chart(alt.Chart(display_df).mark_line(color='#00b4d8').encode(
+            x='timestamp:T', y=alt.Y('voltage:Q', scale=alt.Scale(zero=False))).properties(title="Voltage (V)", height=250), use_container_width=True)
+        st.altair_chart(alt.Chart(display_df).mark_line(color='#ff4b4b').encode(
+            x='timestamp:T', y='power:Q').properties(title="Power Draw (W)", height=250), use_container_width=True)
+    with g2:
+        st.altair_chart(alt.Chart(display_df).mark_line(color='#fb8500').encode(
+            x='timestamp:T', y=alt.Y('current:Q', scale=alt.Scale(zero=False))).properties(title="Current (A)", height=250), use_container_width=True)
+        st.altair_chart(alt.Chart(display_df).mark_line(color='#023e8a').encode(
+            x='timestamp:T', y='total_energy:Q').properties(title="Total Energy Logged (kWh)", height=250), use_container_width=True)
+
+    # --- 5. LARGE SUMMARY METRICS ---
+    st.write("---")
+    metric_col1, metric_col2 = st.columns(2)
+    
+    with metric_col1:
+        st.markdown(
+            f"""<div style="text-align: center; padding: 20px; background-color: rgba(2, 62, 138, 0.1); border-radius: 10px;">
+                <h3 style="margin-bottom: 0px;">Total Energy Logged</h3>
+                <h1 style="color: #023e8a; font-size: 3rem; margin-top: 10px;">{latest_reading['total_energy']:.4f} kWh</h1>
+            </div>""", unsafe_allow_html=True)
         
-        if len(data_buffer) > 50:
-            data_buffer.pop(0)
+    with metric_col2:
+        st.markdown(
+            f"""<div style="text-align: center; padding: 20px; background-color: rgba(42, 157, 143, 0.1); border-radius: 10px;">
+                <h3 style="margin-bottom: 0px;">Cumulative Cost</h3>
+                <h1 style="color: #2a9d8f; font-size: 3rem; margin-top: 10px;">${latest_finance['cumulative_cost']:.4f}</h1>
+            </div>""", unsafe_allow_html=True)
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=CLIENT_ID)
-    client.on_connect = on_connect
-    client.on_message = on_message
+    # --- 6. STATISTICS & ALERT TABLES ---
+    st.write("---")
+    table_col1, table_col2 = st.columns(2)
 
-    client.tls_set(
-        ca_certs=str(CA_PATH),
-        certfile=str(CERT_PATH),
-        keyfile=str(KEY_PATH)
-    )
-    
-    client.connect(AWS_ENDPOINT, 8883, 60)
-    client.loop_start() 
-    return client
+    with table_col1:
+        st.subheader("💵 Financial Statistics (From Pi)")
+        
+        # Format financial data
+        finance_display = financials_df[['timestamp', 'cost_per_hour', 'cost_delta', 'cumulative_cost']].copy()
+        finance_display['timestamp'] = pd.to_datetime(finance_display['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+        finance_display.rename(columns={
+            'timestamp': 'Time', 
+            'cost_per_hour': 'Cost/Hr Rate ($)', 
+            'cost_delta': 'Cost Delta ($)',
+            'cumulative_cost': 'Cumulative ($)'
+        }, inplace=True)
+        
+        st.dataframe(
+            finance_display.style.format({'Cost/Hr Rate ($)': '{:.4f}', 'Cost Delta ($)': '{:.6f}', 'Cumulative ($)': '{:.4f}'}), 
+            use_container_width=True, 
+            hide_index=True
+        )
 
-client = init_mqtt()
+    with table_col2:
+        st.subheader("🚨 Warning & Alert History")
+        if not all_alerts_df.empty:
+            all_alerts_df['time_stamp'] = pd.to_datetime(all_alerts_df['time_stamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            display_alerts = all_alerts_df[['description', 'time_stamp']].rename(columns={'description': 'Alert Message', 'time_stamp': 'Time Detected'})
+            st.dataframe(display_alerts, use_container_width=True, hide_index=True)
+        else:
+            st.success("No alerts found in the database.")
 
-# --- UI Layout ---
-col1, col2, col3 = st.columns(3)
-metric_volts = col1.empty()
-metric_amps = col2.empty()
-metric_power = col3.empty()
-
-st.subheader("Live Power Draw (Watts)")
-chart_placeholder = st.empty()
-
-# --- The Live Update Loop ---
-# FIX: Read from the shared buffer
-if len(data_buffer) > 0:
-    latest = data_buffer[-1]
-    
-    metric_volts.metric("Voltage", f"{latest['voltage_V']} V")
-    metric_amps.metric("Current", f"{latest['current_A']} A")
-    metric_power.metric("Power", f"{latest['power_W']} W")
-    
-    df = pd.DataFrame(data_buffer)
-    chart_placeholder.line_chart(df.set_index('timestamp')['power_W'])
 else:
-    st.info("Waiting for data from Raspberry Pi... Make sure your analysis_outputs.py script is running!")
+    st.info("Waiting for data in the 'readings' and 'financials' tables...")
 
-# Force Streamlit to automatically refresh the page every 1 second
-time.sleep(1)
+# Auto-refresh loop
+time.sleep(2)
 st.rerun()
