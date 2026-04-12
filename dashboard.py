@@ -3,6 +3,8 @@ import pandas as pd
 import altair as alt
 import time
 
+# no change
+
 # --- Page Setup ---
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
