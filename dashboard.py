@@ -79,7 +79,7 @@ if not live_df.empty and not financials_df.empty:
     # --- 3. THE GRAPH GRID ---
     g1, g2 = st.columns(2)
     with g1:
-        st.altair_chart(make_chart(display_df, 'voltage', 'Voltage (V)', '#00b4d8'), use_container_width=True)
+        st.altair_chart(make_chart(display_df, 'voltage', 'Voltage (V)', "#7eb451"), use_container_width=True)
         st.altair_chart(make_chart(display_df, 'power', 'Power Draw (W)', '#ff4b4b'), use_container_width=True)
     with g2:
         st.altair_chart(make_chart(display_df, 'current', 'Current (A)', '#fb8500'), use_container_width=True)
