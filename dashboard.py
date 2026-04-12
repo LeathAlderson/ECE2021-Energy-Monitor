@@ -141,7 +141,7 @@ st.subheader("🚨 Alerts")
 alert_rows = []
 
 for _, row in alerts.iterrows():
-    t = row["time_stamp"].strftime("%H:%M:%S")
+    t = row["time_stamp"].strftime("%Y/%m/%d %H:%M:%S")
     msg = row["description"]
 
     if len(msg) > 80:
