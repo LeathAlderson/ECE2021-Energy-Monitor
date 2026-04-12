@@ -10,12 +10,11 @@ st.title("⚡ Live Energy Monitor Dashboard")
 
 conn = st.connection("neon", type="sql")
 
-# --- STATE ---
+# ---------------- STATE ----------------
 if "time_window" not in st.session_state:
     st.session_state.time_window = "24h"
 
-# --- WINDOW MAP (VIEW ONLY, NO AGGREGATION) ---
-window_map = {
+WINDOWS = {
     "5m": "5 minutes",
     "15m": "15 minutes",
     "1h": "1 hour",
@@ -23,7 +22,7 @@ window_map = {
     "24h": "24 hours"
 }
 
-window_seconds = {
+WINDOW_SECONDS = {
     "5m": 300,
     "15m": 900,
     "1h": 3600,
@@ -31,24 +30,24 @@ window_seconds = {
     "24h": 86400
 }
 
-# --- BUTTONS WITH ACTIVE STATE ---
-cols = st.columns(len(window_map))
+# ---------------- TIME BUTTONS ----------------
+cols = st.columns(len(WINDOWS))
 
-for i, key in enumerate(window_map.keys()):
+for i, key in enumerate(WINDOWS.keys()):
     active = st.session_state.time_window == key
     if cols[i].button(key, use_container_width=True, type="primary" if active else "secondary"):
         st.session_state.time_window = key
         st.rerun()
 
 selected = st.session_state.time_window
-interval = window_map[selected]
+window = WINDOWS[selected]
 
-# --- DATA QUERY (RAW ONLY) ---
+# ---------------- DATA FETCH (RAW ONLY, NO AGGREGATION) ----------------
 try:
     readings = conn.query(f"""
         SELECT timestamp, voltage, current, power, total_energy
         FROM public.readings
-        WHERE timestamp >= NOW() - INTERVAL '{interval}'
+        WHERE timestamp >= NOW() - INTERVAL '{window}'
         ORDER BY timestamp ASC;
     """, ttl=1)
 
@@ -64,28 +63,28 @@ try:
         FROM public.alerts
         ORDER BY time_stamp DESC
         LIMIT 50;
-    """, ttl=5)
+    """, ttl=2)
 
     daily = conn.query("""
         SELECT MAX(total_energy) as total_energy
         FROM public.readings
         WHERE DATE(timestamp) = CURRENT_DATE;
-    """, ttl=2)
+    """, ttl=5)
 
 except Exception as e:
     st.error(f"DB error: {e}")
     st.stop()
 
 if readings.empty or latest.empty:
-    st.info("Waiting for data...")
+    st.info("Waiting for sensor data...")
     st.stop()
 
-# --- FORMAT ---
+# ---------------- FORMAT ----------------
 readings["timestamp"] = pd.to_datetime(readings["timestamp"])
 alerts["time_stamp"] = pd.to_datetime(alerts["time_stamp"])
 latest = latest.iloc[0]
 
-# --- LIVE METRICS ---
+# ---------------- LIVE METRICS ----------------
 c1, c2, c3 = st.columns(3)
 c1.metric("Voltage", f"{latest['voltage']:.2f} V")
 c2.metric("Current", f"{latest['current']:.2f} A")
@@ -93,85 +92,99 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# --- CHART ---
-def chart(df, col, title, color):
+# ---------------- CHART ----------------
+def make_chart(df, col, title, color):
     return alt.Chart(df).mark_line(color=color).encode(
-        x=alt.X("timestamp:T", title="Time"),
+        x=alt.X("timestamp:T", title=None),
         y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
-    ).properties(height=250, title=title)
+    ).properties(height=240, title=title)
 
-# --- GRAPHS ---
+# ---------------- GRAPHS ----------------
 g1, g2 = st.columns(2)
 
 with g1:
-    st.altair_chart(chart(readings, "voltage", "Voltage (V)", "#7eb451"), use_container_width=True)
-    st.altair_chart(chart(readings, "power", "Power (W)", "#ff4b4b"), use_container_width=True)
+    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"), use_container_width=True)
+    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"), use_container_width=True)
 
 with g2:
-    st.altair_chart(chart(readings, "current", "Current (A)", "#fb8500"), use_container_width=True)
-    st.altair_chart(chart(readings, "total_energy", "Energy (Wh)", "#023e8a"), use_container_width=True)
+    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"), use_container_width=True)
+    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"), use_container_width=True)
 
-# --- DAILY ENERGY ---
+# ---------------- DAILY METRICS ----------------
 st.write("---")
 
-daily_energy = float(daily.iloc[0]["total_energy"]) if not daily.empty and daily.iloc[0]["total_energy"] else 0.0
+daily_energy = float(daily.iloc[0]["total_energy"] or 0)
 daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
 
 m1, m2 = st.columns(2)
 
 m1.markdown(f"""
-<div style="text-align:center; padding:18px; border-radius:8px; background:rgba(2,62,138,0.08);">
+<div style="
+    text-align:center;
+    padding:16px;
+    border-radius:10px;
+    background:rgba(2,62,138,0.08);
+">
 <h4>Today's Energy</h4>
 <h2 style="color:#023e8a;">{daily_energy:.4f} Wh</h2>
 </div>
 """, unsafe_allow_html=True)
 
 m2.markdown(f"""
-<div style="text-align:center; padding:18px; border-radius:8px; background:rgba(42,157,143,0.08);">
+<div style="
+    text-align:center;
+    padding:16px;
+    border-radius:10px;
+    background:rgba(42,157,143,0.08);
+">
 <h4>Today's Cost</h4>
 <h2 style="color:#2a9d8f;">${daily_cost:.5f}</h2>
 </div>
 """, unsafe_allow_html=True)
 
-# --- ALERTS ---
+# ---------------- ALERTS (FIXED SCROLL PANEL) ----------------
 st.write("---")
 st.subheader("🚨 Alerts")
 
 st.markdown("""
 <div style="
-    max-height:160px;
+    max-height:180px;
     overflow-y:auto;
-    border:1px solid rgba(255,255,255,0.1);
-    border-radius:8px;
-    padding:6px;
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:10px;
+    padding:8px;
     background:rgba(255,255,255,0.02);
 ">
 """, unsafe_allow_html=True)
 
 for _, row in alerts.iterrows():
-    msg = row["description"][:55] + ("..." if len(row["description"]) > 55 else "")
-    time_str = row["time_stamp"].strftime("%H:%M:%S")
+    msg = row["description"]
+    if len(msg) > 60:
+        msg = msg[:60] + "..."
 
-    cols = st.columns([8,1])
+    t = row["time_stamp"].strftime("%H:%M:%S")
 
-    with cols[0]:
-        st.markdown(
-            f"<div style='font-size:13px;'>"
-            f"<span style='color:gray'>{time_str}</span> — {msg}"
-            f"</div>",
-            unsafe_allow_html=True
-        )
-
-    with cols[1]:
-        if st.button("✕", key=f"del_{row['id']}"):
-            with conn.session as s:
-                s.execute(f"DELETE FROM public.alerts WHERE id = '{row['id']}'")
-                s.commit()
-            st.rerun()
+    st.markdown(
+        f"""
+        <div style="
+            display:flex;
+            justify-content:space-between;
+            padding:6px 8px;
+            margin-bottom:6px;
+            border-radius:6px;
+            background:rgba(255,255,255,0.03);
+            font-size:13px;
+        ">
+            <span style="color:gray">{t}</span>
+            <span>{msg}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 st.markdown("</div>", unsafe_allow_html=True)
 
-# --- DOWNLOAD ---
+# ---------------- DOWNLOAD ----------------
 st.write("---")
 
 download_df = conn.query("""
@@ -188,6 +201,6 @@ st.download_button(
     "text/csv"
 )
 
-# --- REFRESH ---
+# ---------------- REFRESH ----------------
 time.sleep(1)
 st.rerun()
