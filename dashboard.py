@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import altair as alt
+import plotly.graph_objects as go
 import time
 
 RATE_PER_KWH = 0.15
@@ -9,9 +9,6 @@ st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
 
 conn = st.connection("neon", type="sql")
-
-# 🔥 IMPORTANT: prevents Altair silent rendering limits
-alt.data_transformers.disable_max_rows()
 
 # ---------------- STATE ----------------
 if "time_window" not in st.session_state:
@@ -25,23 +22,19 @@ WINDOWS = {
     "24h": "24 hours"
 }
 
-# ---------------- TIME BUTTONS ----------------
 cols = st.columns(len(WINDOWS))
 
 for i, key in enumerate(WINDOWS.keys()):
     active = st.session_state.time_window == key
-    if cols[i].button(
-        key,
-        use_container_width=True,
-        type="primary" if active else "secondary"
-    ):
+    if cols[i].button(key, use_container_width=True,
+                      type="primary" if active else "secondary"):
         st.session_state.time_window = key
         st.rerun()
 
 selected = st.session_state.time_window
 window = WINDOWS[selected]
 
-# ---------------- DATA FETCH ----------------
+# ---------------- DATA ----------------
 try:
     readings = conn.query(f"""
         SELECT timestamp, voltage, current, power, total_energy
@@ -83,7 +76,7 @@ readings["timestamp"] = pd.to_datetime(readings["timestamp"])
 alerts["time_stamp"] = pd.to_datetime(alerts["time_stamp"])
 latest = latest.iloc[0]
 
-# ---------------- LIVE METRICS ----------------
+# ---------------- METRICS ----------------
 c1, c2, c3 = st.columns(3)
 c1.metric("Voltage", f"{latest['voltage']:.2f} V")
 c2.metric("Current", f"{latest['current']:.2f} A")
@@ -91,87 +84,71 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# ---------------- CHART (STABLE + HOVER FIXED) ----------------
-def make_chart(df, col, title, color):
+# ---------------- PLOTLY ENGINE ----------------
+def make_plot(df, y, title, color):
+    fig = go.Figure()
 
-    base = alt.Chart(df).encode(
-        x=alt.X(
-            "timestamp:T",
-            axis=alt.Axis(
-                title=None,
-                format="%H:%M"
-            )
-        ),
-        y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
+    fig.add_trace(go.Scatter(
+        x=df["timestamp"],
+        y=df[y],
+        mode="lines",
+        name=title,
+        line=dict(color=color),
+        hovertemplate=
+            "%{x|%Y/%m/%d %H:%M:%S}<br>" +
+            f"{title}: %{{y:.4f}}<extra></extra>"
+    ))
+
+    fig.update_layout(
+        height=260,
+        title=title,
+        hovermode="x unified",   # THIS is your crosshair fix
+        margin=dict(l=10, r=10, t=40, b=10),
     )
 
-    line = base.mark_line(color=color)
-
-    nearest = alt.selection_point(
-        fields=["timestamp"],
-        nearest=True,
-        on="mouseover",
-        empty="none"
+    fig.update_xaxes(
+        showgrid=False,
+        tickformat="%H:%M\n%d/%m"
     )
 
-    points = base.mark_point(opacity=0, size=0).add_params(nearest)
+    fig.update_yaxes(fixedrange=True)
 
-    rule = base.mark_rule(color="gray").encode(
-        opacity=alt.condition(nearest, alt.value(0.6), alt.value(0))
-    )
-
-    tooltip = base.mark_point(opacity=0).encode(
-        tooltip=[
-            alt.Tooltip("timestamp:T", title="Time", format="%Y/%m/%d %H:%M:%S"),
-            alt.Tooltip(f"{col}:Q", title=title)
-        ]
-    ).add_params(nearest)
-
-    return (
-        (line + rule + points + tooltip)
-        .properties(height=240, title=title)
-    )
+    return fig
 
 # ---------------- GRAPHS ----------------
 g1, g2 = st.columns(2)
 
 with g1:
-    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"), use_container_width=True)
-    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"), use_container_width=True)
+    st.plotly_chart(make_plot(readings, "voltage", "Voltage (V)", "#7eb451"),
+                    use_container_width=True)
+    st.plotly_chart(make_plot(readings, "power", "Power (W)", "#ff4b4b"),
+                    use_container_width=True)
 
 with g2:
-    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"), use_container_width=True)
-    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"), use_container_width=True)
+    st.plotly_chart(make_plot(readings, "current", "Current (A)", "#fb8500"),
+                    use_container_width=True)
+    st.plotly_chart(make_plot(readings, "total_energy", "Energy (Wh)", "#023e8a"),
+                    use_container_width=True)
 
 # ---------------- DAILY METRICS ----------------
 st.write("---")
 
-daily_energy_wh = float(daily.iloc[0]["total_energy"] or 0)
-
-daily_kwh = daily_energy_wh / 1000.0
-daily_cost = daily_kwh * RATE_PER_KWH
+daily_energy = float(daily.iloc[0]["total_energy"] or 0)
+daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
 
 m1, m2 = st.columns(2)
 
 m1.markdown(f"""
-<div style="
-    text-align:center;
-    padding:16px;
-    border-radius:10px;
-    background:rgba(2,62,138,0.08);
-">
+<div style="text-align:center; padding:16px; border-radius:10px;
+background:rgba(2,62,138,0.08);">
 <h4>Today's Energy</h4>
-<h2 style="color:#023e8a;">{daily_energy_wh:.4f} Wh</h2>
+<h2 style="color:#023e8a;">{daily_energy:.4f} Wh</h2>
 </div>
 """, unsafe_allow_html=True)
 
 m2.markdown(f"""
-<div style="
-    text-align:center;
-    padding:16px;
-    border-radius:10px;
-    background:rgba(42,157,143,0.08);
-">
+<div style="text-align:center; padding:16px; border-radius:10px;
+background:rgba(42,157,143,0.08);">
 <h4>Today's Cost</h4>
 <h2 style="color:#2a9d8f;">${daily_cost:.5f}</h2>
 </div>
@@ -182,20 +159,13 @@ st.write("---")
 st.subheader("🚨 Alerts")
 
 alert_rows = []
-
 for _, row in alerts.iterrows():
     t = row["time_stamp"].strftime("%Y/%m/%d %H:%M:%S")
-    msg = row["description"]
-
-    if len(msg) > 80:
-        msg = msg[:80] + "..."
-
+    msg = row["description"][:80]
     alert_rows.append([f"{t} — {msg}"])
 
-alerts_df = pd.DataFrame(alert_rows, columns=["Alert"])
-
 st.dataframe(
-    alerts_df,
+    pd.DataFrame(alert_rows, columns=["Alert"]),
     use_container_width=True,
     height=180,
     hide_index=True
@@ -218,6 +188,6 @@ st.download_button(
     "text/csv"
 )
 
-# ---------------- REFRESH LOOP ----------------
+# ---------------- REFRESH ----------------
 time.sleep(1)
 st.rerun()
