@@ -42,7 +42,7 @@ if not live_df.empty and not financials_df.empty:
     cols = st.columns(len(options))
     for i, opt in enumerate(options):
         btn_color = "primary" if st.session_state.time_window == opt else "secondary"
-        cols[i].button(opt, type=btn_color, use_container_width=True, on_click=set_window, args=(opt,), key=f"btn_{opt}")
+        cols[i].button(opt, type=btn_color, width='stretch', on_click=set_window, args=(opt,), key=f"btn_{opt}")
 
     # --- 3. DATA PREP ---
     # Reverse order for chronological graphing
@@ -64,14 +64,14 @@ if not live_df.empty and not financials_df.empty:
     g1, g2 = st.columns(2)
     with g1:
         st.altair_chart(alt.Chart(display_df).mark_line(color='#00b4d8').encode(
-            x='timestamp:T', y=alt.Y('voltage:Q', scale=alt.Scale(zero=False))).properties(title="Voltage (V)", height=250), use_container_width=True)
+            x='timestamp:T', y=alt.Y('voltage:Q', scale=alt.Scale(zero=False))).properties(title="Voltage (V)", height=250), width='stretch')
         st.altair_chart(alt.Chart(display_df).mark_line(color='#ff4b4b').encode(
-            x='timestamp:T', y='power:Q').properties(title="Power Draw (W)", height=250), use_container_width=True)
+            x='timestamp:T', y='power:Q').properties(title="Power Draw (W)", height=250), width='stretch')
     with g2:
         st.altair_chart(alt.Chart(display_df).mark_line(color='#fb8500').encode(
-            x='timestamp:T', y=alt.Y('current:Q', scale=alt.Scale(zero=False))).properties(title="Current (A)", height=250), use_container_width=True)
+            x='timestamp:T', y=alt.Y('current:Q', scale=alt.Scale(zero=False))).properties(title="Current (A)", height=250), width='stretch')
         st.altair_chart(alt.Chart(display_df).mark_line(color='#023e8a').encode(
-            x='timestamp:T', y='total_energy:Q').properties(title="Total Energy Logged (kWh)", height=250), use_container_width=True)
+            x='timestamp:T', y='total_energy:Q').properties(title="Total Energy Logged (kWh)", height=250), width='stretch')
 
     # --- 5. LARGE SUMMARY METRICS ---
     st.write("---")
@@ -110,7 +110,7 @@ if not live_df.empty and not financials_df.empty:
         
         st.dataframe(
             finance_display.style.format({'Cost/Hr Rate ($)': '{:.4f}', 'Cost Delta ($)': '{:.6f}', 'Cumulative ($)': '{:.4f}'}), 
-            use_container_width=True, 
+            width = 'stretch', 
             hide_index=True
         )
 
@@ -119,7 +119,7 @@ if not live_df.empty and not financials_df.empty:
         if not all_alerts_df.empty:
             all_alerts_df['time_stamp'] = pd.to_datetime(all_alerts_df['time_stamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
             display_alerts = all_alerts_df[['description', 'time_stamp']].rename(columns={'description': 'Alert Message', 'time_stamp': 'Time Detected'})
-            st.dataframe(display_alerts, use_container_width=True, hide_index=True)
+            st.dataframe(display_alerts, width='stretch', hide_index=True)
         else:
             st.success("No alerts found in the database.")
 
@@ -135,7 +135,7 @@ if not live_df.empty and not financials_df.empty:
             data=telemetry_csv, 
             file_name=f"telemetry_data_{time.strftime('%Y%m%d_%H%M%S')}.csv", 
             mime='text/csv',
-            use_container_width=True
+            width='stretch'
         )
         
     with dl_col2:
@@ -145,7 +145,7 @@ if not live_df.empty and not financials_df.empty:
             data=financials_csv, 
             file_name=f"financial_data_{time.strftime('%Y%m%d_%H%M%S')}.csv", 
             mime='text/csv',
-            use_container_width=True
+            width='stretch'
         )
 
 else:
