@@ -84,22 +84,66 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# ---------------- CHART ----------------
+# ---------------- CHART CORE ----------------
 def make_chart(df, col, title, color):
-    return alt.Chart(df).mark_line(color=color).encode(
-        x=alt.X("timestamp:T", title=None),
+    base = alt.Chart(df).encode(
+        x=alt.X(
+            "timestamp:T",
+            title=None,
+            axis=alt.Axis(format="%Y/%m/%d %H:%M:%S")
+        ),
         y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
-    ).properties(height=240, title=title)
+    )
 
+    line = base.mark_line(color=color)
+
+    nearest = alt.selection_point(
+        nearest=True,
+        on="mouseover",
+        fields=["timestamp"],
+        empty=False
+    )
+
+    selectors = base.mark_point(opacity=0).add_params(nearest)
+
+    rule = base.mark_rule(color="gray").transform_filter(nearest)
+
+    points = base.mark_point(size=60, color=color).transform_filter(nearest)
+
+    text = base.mark_text(
+        align="left",
+        dx=10,
+        dy=-10
+    ).encode(
+        text=f"{col}:Q"
+    ).transform_filter(nearest)
+
+    chart = (
+        line + selectors + rule + points + text
+    ).properties(
+        height=240,
+        title=title
+    ).interactive()
+
+    # IMPORTANT: removes table + menu
+    return chart.to_dict()
+
+# ---------------- GRAPHS (NO TABLE VIEW) ----------------
 g1, g2 = st.columns(2)
 
 with g1:
-    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"), use_container_width=True)
-    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"), use_container_width=True)
+    st.vega_lite_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"),
+                       use_container_width=True, actions=False)
+
+    st.vega_lite_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"),
+                       use_container_width=True, actions=False)
 
 with g2:
-    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"), use_container_width=True)
-    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"), use_container_width=True)
+    st.vega_lite_chart(make_chart(readings, "current", "Current (A)", "#fb8500"),
+                       use_container_width=True, actions=False)
+
+    st.vega_lite_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"),
+                       use_container_width=True, actions=False)
 
 # ---------------- DAILY METRICS ----------------
 st.write("---")
@@ -133,11 +177,10 @@ m2.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- ALERTS (FIXED TABLE STYLE) ----------------
+# ---------------- ALERTS ----------------
 st.write("---")
 st.subheader("🚨 Alerts")
 
-# build clean display strings
 alert_rows = []
 
 for _, row in alerts.iterrows():
@@ -154,25 +197,8 @@ alerts_df = pd.DataFrame(alert_rows, columns=["Alert"])
 st.dataframe(
     alerts_df,
     use_container_width=True,
-    height=180,   # <-- THIS is your scroll container fix
+    height=180,
     hide_index=True
-)
-
-# ---------------- DOWNLOAD ----------------
-st.write("---")
-
-download_df = conn.query("""
-    SELECT timestamp, voltage, current, power, total_energy
-    FROM public.readings
-    WHERE timestamp >= NOW() - INTERVAL '24 hours'
-    ORDER BY timestamp ASC;
-""", ttl=10)
-
-st.download_button(
-    "Download Last 24h Data",
-    download_df.to_csv(index=False).encode(),
-    "energy_data.csv",
-    "text/csv"
 )
 
 # ---------------- REFRESH ----------------
