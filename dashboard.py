@@ -22,15 +22,6 @@ WINDOWS = {
     "24h": "24 hours"
 }
 
-# ---------------- TIME FORMAT LOGIC ----------------
-def get_time_format(window):
-    if window in ["5m", "15m"]:
-        return "%H:%M:%S"
-    elif window == "1h":
-        return "%H:%M"
-    else:
-        return "%Y/%m/%d %H:%M"
-
 # ---------------- TIME BUTTONS ----------------
 cols = st.columns(len(WINDOWS))
 
@@ -46,6 +37,29 @@ for i, key in enumerate(WINDOWS.keys()):
 
 selected = st.session_state.time_window
 window = WINDOWS[selected]
+
+# ---------------- GAP BREAKING ----------------
+def break_line_on_gaps(df, max_gap_minutes=2):
+    df = df.sort_values("timestamp").copy()
+
+    df["gap"] = df["timestamp"].diff().dt.total_seconds() / 60
+
+    out = []
+
+    for i in range(len(df)):
+        if i > 0 and df.iloc[i]["gap"] > max_gap_minutes:
+            out.append({
+                "timestamp": df.iloc[i]["timestamp"],
+                "voltage": None,
+                "current": None,
+                "power": None,
+                "total_energy": None
+            })
+
+        out.append(df.iloc[i].drop("gap").to_dict())
+
+    return pd.DataFrame(out)
+
 
 # ---------------- DATA FETCH ----------------
 try:
@@ -89,6 +103,9 @@ readings["timestamp"] = pd.to_datetime(readings["timestamp"])
 alerts["time_stamp"] = pd.to_datetime(alerts["time_stamp"])
 latest = latest.iloc[0]
 
+# apply gap breaking AFTER datetime conversion
+readings = break_line_on_gaps(readings, max_gap_minutes=2)
+
 # ---------------- LIVE METRICS ----------------
 c1, c2, c3 = st.columns(3)
 c1.metric("Voltage", f"{latest['voltage']:.2f} V")
@@ -98,14 +115,14 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 st.write("---")
 
 # ---------------- CHART ----------------
-def make_chart(df, col, title, color, window):
+def make_chart(df, col, title, color):
 
     base = alt.Chart(df).encode(
         x=alt.X(
             "timestamp:T",
             axis=alt.Axis(
                 title=None,
-                format=get_time_format(window)
+                format="%Y/%m/%d %H:%M:%S"
             )
         ),
         y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
@@ -153,15 +170,15 @@ def make_chart(df, col, title, color, window):
 g1, g2 = st.columns(2)
 
 with g1:
-    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451", selected),
+    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"),
                     use_container_width=True)
-    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b", selected),
+    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"),
                     use_container_width=True)
 
 with g2:
-    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500", selected),
+    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"),
                     use_container_width=True)
-    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a", selected),
+    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"),
                     use_container_width=True)
 
 # ---------------- DAILY METRICS ----------------
