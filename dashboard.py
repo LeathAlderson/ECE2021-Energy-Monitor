@@ -4,7 +4,7 @@ import altair as alt
 import time
 
 RATE_PER_KWH = 0.15
-GAP_THRESHOLD_SECONDS = 5  # <-- your rule
+GAP_THRESHOLD_SECONDS = 5  # your requirement
 
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
@@ -28,7 +28,8 @@ cols = st.columns(len(WINDOWS))
 
 for i, key in enumerate(WINDOWS.keys()):
     active = st.session_state.time_window == key
-    if cols[i].button(key, use_container_width=True, type="primary" if active else "secondary"):
+    if cols[i].button(key, use_container_width=True,
+                      type="primary" if active else "secondary"):
         st.session_state.time_window = key
         st.rerun()
 
@@ -77,34 +78,49 @@ readings["timestamp"] = pd.to_datetime(readings["timestamp"])
 alerts["time_stamp"] = pd.to_datetime(alerts["time_stamp"])
 latest = latest.iloc[0]
 
-# ---------------- GAP INSERTION (KEY FIX) ----------------
-def inject_gaps(df):
-    df = df.sort_values("timestamp").copy()
+readings = readings.sort_values("timestamp")
 
+# ---------------- GAP INSERTION (THIS IS THE FIX) ----------------
+def insert_gaps(df, threshold_seconds=5):
+    df = df.copy()
     new_rows = []
-    prev = None
 
-    for _, row in df.iterrows():
-        if prev is not None:
-            delta = (row["timestamp"] - prev["timestamp"]).total_seconds()
+    for i in range(len(df)):
+        if i == 0:
+            new_rows.append(df.iloc[i])
+            continue
 
-            if delta > GAP_THRESHOLD_SECONDS:
-                # insert gap row (forces line break)
-                gap_row = {
-                    "timestamp": prev["timestamp"] + pd.Timedelta(seconds=1),
-                    "voltage": None,
-                    "current": None,
-                    "power": None,
-                    "total_energy": None
-                }
-                new_rows.append(gap_row)
+        prev = df.iloc[i - 1]
+        curr = df.iloc[i]
 
-        new_rows.append(row.to_dict())
-        prev = row
+        gap = (curr["timestamp"] - prev["timestamp"]).total_seconds()
+
+        if gap > threshold_seconds:
+            # insert a break (NaN row = line break in Altair)
+            gap_row = curr.copy()
+            gap_row["voltage"] = None
+            gap_row["current"] = None
+            gap_row["power"] = None
+            gap_row["total_energy"] = None
+            new_rows.append(gap_row)
+
+        new_rows.append(curr)
 
     return pd.DataFrame(new_rows)
 
-readings = inject_gaps(readings)
+readings = insert_gaps(readings, GAP_THRESHOLD_SECONDS)
+
+# ---------------- SMART AXIS FORMAT ----------------
+def axis_format(window_key):
+    return {
+        "5m": "%H:%M:%S",
+        "15m": "%H:%M:%S",
+        "1h": "%H:%M",
+        "6h": "%H:%M",
+        "24h": "%Y/%m/%d"
+    }.get(window_key, "%H:%M")
+
+fmt = axis_format(selected)
 
 # ---------------- LIVE METRICS ----------------
 c1, c2, c3 = st.columns(3)
@@ -114,50 +130,48 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# ---------------- CHART ----------------
+# ---------------- CHART (FIXED + GAP AWARE) ----------------
 def make_chart(df, col, title, color):
 
     base = alt.Chart(df).encode(
         x=alt.X(
             "timestamp:T",
-            axis=alt.Axis(
-                title=None,
-                format="%H:%M:%S"  # smart enough; browser auto compresses visually
-            )
+            axis=alt.Axis(title=None, format=fmt)
         ),
         y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
     )
 
-    line = base.mark_line(color=color)
+    line = base.mark_line(color=color, interpolate="linear")
 
     nearest = alt.selection_point(
         name="hover",
         fields=["timestamp"],
         nearest=True,
         on="mouseover",
-        empty="none",
-        clear="mouseout"
+        empty="none"
     )
 
-    hover_points = base.mark_point(opacity=0).add_params(nearest)
+    selectors = base.mark_point(opacity=0).add_params(nearest)
 
     crosshair = base.mark_rule(color="gray").encode(
         opacity=alt.condition(nearest, alt.value(0.6), alt.value(0))
     )
 
-    highlight = base.mark_point(size=70, color=color).encode(
-        opacity=alt.condition(nearest, alt.value(1), alt.value(0))
-    )
+    highlight = base.mark_point(size=60, color=color).transform_filter(nearest)
 
     tooltip = base.mark_text(
         align="left",
         dx=10,
         dy=-10
     ).encode(
-        text=alt.Text(f"{col}:Q", format=".3f")
-    ).transform_filter(nearest)
+        text=alt.condition(
+            nearest,
+            alt.Text(f"{col}:Q", format=".3f"),
+            alt.value("")
+        )
+    )
 
-    return (line + hover_points + crosshair + highlight + tooltip).properties(
+    return (line + selectors + crosshair + highlight + tooltip).properties(
         height=240,
         title=title
     )
@@ -168,16 +182,18 @@ g1, g2 = st.columns(2)
 with g1:
     st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"),
                     use_container_width=True)
+
     st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"),
                     use_container_width=True)
 
 with g2:
     st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"),
                     use_container_width=True)
+
     st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"),
                     use_container_width=True)
 
-# ---------------- DAILY ----------------
+# ---------------- DAILY METRICS ----------------
 st.write("---")
 
 daily_energy = float(daily.iloc[0]["total_energy"] or 0)
@@ -186,16 +202,24 @@ daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
 m1, m2 = st.columns(2)
 
 m1.markdown(f"""
-<div style="text-align:center; padding:16px; border-radius:10px;
-background:rgba(2,62,138,0.08);">
+<div style="
+    text-align:center;
+    padding:16px;
+    border-radius:10px;
+    background:rgba(2,62,138,0.08);
+">
 <h4>Today's Energy</h4>
 <h2 style="color:#023e8a;">{daily_energy:.4f} Wh</h2>
 </div>
 """, unsafe_allow_html=True)
 
 m2.markdown(f"""
-<div style="text-align:center; padding:16px; border-radius:10px;
-background:rgba(42,157,143,0.08);">
+<div style="
+    text-align:center;
+    padding:16px;
+    border-radius:10px;
+    background:rgba(42,157,143,0.08);
+">
 <h4>Today's Cost</h4>
 <h2 style="color:#2a9d8f;">${daily_cost:.5f}</h2>
 </div>
@@ -206,6 +230,7 @@ st.write("---")
 st.subheader("🚨 Alerts")
 
 alert_rows = []
+
 for _, row in alerts.iterrows():
     t = row["time_stamp"].strftime("%Y/%m/%d %H:%M:%S")
     msg = row["description"]
@@ -226,6 +251,7 @@ st.dataframe(
 
 # ---------------- DOWNLOAD ----------------
 st.write("---")
+st.subheader("📥 Download Data (24h)")
 
 download_df = conn.query("""
     SELECT timestamp, voltage, current, power, total_energy
