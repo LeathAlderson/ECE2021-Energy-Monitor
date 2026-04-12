@@ -9,12 +9,20 @@ st.title("⚡ Live Energy Monitor Dashboard")
 
 # --- Helper Function ---
 def make_chart(data, y_col, title, color):
-    """Generates an Altair line chart to reduce repeated code."""
+    """Generates an Altair line chart with optimized title spacing."""
     return alt.Chart(data).mark_line(color=color).encode(
         x=alt.X('timestamp:T', title="Time"),
-        y=alt.Y(f'{y_col}:Q', title=title, scale=alt.Scale(zero=False))
-    ).properties(title=title, height=250)
-
+        y=alt.Y(f'{y_col}:Q', title=None, scale=alt.Scale(zero=False)) # 'title=None' removes the axis label to save space since the header has it
+    ).properties(
+        title=title, 
+        height=250
+    ).configure_title(
+        fontSize=16,
+        anchor='start',
+        dx=30 # This offsets the title to the right so it doesn't hit the edge
+    ).configure_view(
+        strokeWidth=0 # Cleans up the border to give the title more breathing room
+    )
 # --- Neon Database Connection ---
 conn = st.connection("neon", type="sql")
 
