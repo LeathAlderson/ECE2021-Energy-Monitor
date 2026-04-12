@@ -22,12 +22,25 @@ WINDOWS = {
     "24h": "24 hours"
 }
 
+# ---------------- TIME FORMAT LOGIC ----------------
+def get_time_format(window):
+    if window in ["5m", "15m"]:
+        return "%H:%M:%S"
+    elif window == "1h":
+        return "%H:%M"
+    else:
+        return "%Y/%m/%d %H:%M"
+
 # ---------------- TIME BUTTONS ----------------
 cols = st.columns(len(WINDOWS))
 
 for i, key in enumerate(WINDOWS.keys()):
     active = st.session_state.time_window == key
-    if cols[i].button(key, use_container_width=True, type="primary" if active else "secondary"):
+    if cols[i].button(
+        key,
+        use_container_width=True,
+        type="primary" if active else "secondary"
+    ):
         st.session_state.time_window = key
         st.rerun()
 
@@ -84,15 +97,15 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# ---------------- FIXED CHART (NEAREST + CROSSHAIR) ----------------
-def make_chart(df, col, title, color):
+# ---------------- CHART ----------------
+def make_chart(df, col, title, color, window):
 
     base = alt.Chart(df).encode(
         x=alt.X(
             "timestamp:T",
             axis=alt.Axis(
                 title=None,
-                format="%Y/%m/%d %H:%M:%S"
+                format=get_time_format(window)
             )
         ),
         y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
@@ -131,28 +144,24 @@ def make_chart(df, col, title, color):
         )
     )
 
-    chart = (
-        line + hover_points + crosshair + highlight + tooltip
-    ).properties(
+    return (line + hover_points + crosshair + highlight + tooltip).properties(
         height=240,
         title=title
     )
-
-    return chart
 
 # ---------------- GRAPHS ----------------
 g1, g2 = st.columns(2)
 
 with g1:
-    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"),
+    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451", selected),
                     use_container_width=True)
-    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"),
+    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b", selected),
                     use_container_width=True)
 
 with g2:
-    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"),
+    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500", selected),
                     use_container_width=True)
-    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"),
+    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a", selected),
                     use_container_width=True)
 
 # ---------------- DAILY METRICS ----------------
