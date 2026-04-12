@@ -101,14 +101,14 @@ if not live_df.empty:
     with metric_col1:
         st.markdown(
             f"""<div style="text-align: center; padding: 20px; background-color: rgba(2, 62, 138, 0.1); border-radius: 10px;">
-                <h3 style="margin-bottom: 0px;">Energy Consumed today</h3>
+                <h3 style="margin-bottom: 0px;">Energy Consumed Today</h3>
                 <h1 style="color: #023e8a; font-size: 3rem; margin-top: 10px;">{daily_energy:.4f} kWh</h1>
             </div>""", unsafe_allow_html=True)
         
     with metric_col2:
         st.markdown(
             f"""<div style="text-align: center; padding: 20px; background-color: rgba(42, 157, 143, 0.1); border-radius: 10px;">
-                <h3 style="margin-bottom: 0px;">Operating Cost today</h3>
+                <h3 style="margin-bottom: 0px;">Operating Cost Today</h3>
                 <h1 style="color: #2a9d8f; font-size: 3rem; margin-top: 10px;">${daily_cost:.4f}</h1>
             </div>""", unsafe_allow_html=True)
 
