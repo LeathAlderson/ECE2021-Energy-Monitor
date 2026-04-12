@@ -47,11 +47,13 @@ if not live_df.empty and not financials_df.empty:
     # --- 3. DATA PREP ---
     # Reverse order for chronological graphing
     chart_df = live_df.iloc[::-1].copy()
-    chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
+    
+    # Convert to datetime, ensure it knows it is UTC, then convert to Atlantic Time
+    chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp']).dt.tz_convert('America/Moncton')
     
     finance_chart_df = financials_df.iloc[::-1].copy()
-    finance_chart_df['timestamp'] = pd.to_datetime(finance_chart_df['timestamp'])
-    
+    finance_chart_df['timestamp'] = pd.to_datetime(finance_chart_df['timestamp']).dt.tz_convert('America/Moncton')
+
     window_map = {"5 Minutes": 5, "15 Minutes": 15, "1 Hour": 60, "6 Hours": 360, "24 Hours": 1440}
     mins_back = window_map[st.session_state.time_window]
     
@@ -117,7 +119,7 @@ if not live_df.empty and not financials_df.empty:
     with table_col2:
         st.subheader("🚨 Warning & Alert History")
         if not all_alerts_df.empty:
-            all_alerts_df['time_stamp'] = pd.to_datetime(all_alerts_df['time_stamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            all_alerts_df['time_stamp'] = pd.to_datetime(all_alerts_df['time_stamp']).dt.tz_convert('America/Moncton').dt.strftime('%Y-%m-%d %H:%M:%S')
             display_alerts = all_alerts_df[['description', 'time_stamp']].rename(columns={'description': 'Alert Message', 'time_stamp': 'Time Detected'})
             st.dataframe(display_alerts, width='stretch', hide_index=True)
         else:
