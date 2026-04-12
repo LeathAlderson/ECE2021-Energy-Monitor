@@ -4,6 +4,7 @@ import altair as alt
 import time
 
 RATE_PER_KWH = 0.15
+GAP_THRESHOLD_SECONDS = 5  # <-- your rule
 
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
@@ -27,39 +28,12 @@ cols = st.columns(len(WINDOWS))
 
 for i, key in enumerate(WINDOWS.keys()):
     active = st.session_state.time_window == key
-    if cols[i].button(
-        key,
-        use_container_width=True,
-        type="primary" if active else "secondary"
-    ):
+    if cols[i].button(key, use_container_width=True, type="primary" if active else "secondary"):
         st.session_state.time_window = key
         st.rerun()
 
 selected = st.session_state.time_window
 window = WINDOWS[selected]
-
-# ---------------- GAP BREAKING ----------------
-def break_line_on_gaps(df, max_gap_minutes=2):
-    df = df.sort_values("timestamp").copy()
-
-    df["gap"] = df["timestamp"].diff().dt.total_seconds() / 60
-
-    out = []
-
-    for i in range(len(df)):
-        if i > 0 and df.iloc[i]["gap"] > max_gap_minutes:
-            out.append({
-                "timestamp": df.iloc[i]["timestamp"],
-                "voltage": None,
-                "current": None,
-                "power": None,
-                "total_energy": None
-            })
-
-        out.append(df.iloc[i].drop("gap").to_dict())
-
-    return pd.DataFrame(out)
-
 
 # ---------------- DATA FETCH ----------------
 try:
@@ -103,8 +77,34 @@ readings["timestamp"] = pd.to_datetime(readings["timestamp"])
 alerts["time_stamp"] = pd.to_datetime(alerts["time_stamp"])
 latest = latest.iloc[0]
 
-# apply gap breaking AFTER datetime conversion
-readings = break_line_on_gaps(readings, max_gap_minutes=2)
+# ---------------- GAP INSERTION (KEY FIX) ----------------
+def inject_gaps(df):
+    df = df.sort_values("timestamp").copy()
+
+    new_rows = []
+    prev = None
+
+    for _, row in df.iterrows():
+        if prev is not None:
+            delta = (row["timestamp"] - prev["timestamp"]).total_seconds()
+
+            if delta > GAP_THRESHOLD_SECONDS:
+                # insert gap row (forces line break)
+                gap_row = {
+                    "timestamp": prev["timestamp"] + pd.Timedelta(seconds=1),
+                    "voltage": None,
+                    "current": None,
+                    "power": None,
+                    "total_energy": None
+                }
+                new_rows.append(gap_row)
+
+        new_rows.append(row.to_dict())
+        prev = row
+
+    return pd.DataFrame(new_rows)
+
+readings = inject_gaps(readings)
 
 # ---------------- LIVE METRICS ----------------
 c1, c2, c3 = st.columns(3)
@@ -122,7 +122,7 @@ def make_chart(df, col, title, color):
             "timestamp:T",
             axis=alt.Axis(
                 title=None,
-                format="%Y/%m/%d %H:%M:%S"
+                format="%H:%M:%S"  # smart enough; browser auto compresses visually
             )
         ),
         y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
@@ -135,7 +135,7 @@ def make_chart(df, col, title, color):
         fields=["timestamp"],
         nearest=True,
         on="mouseover",
-        empty=False,
+        empty="none",
         clear="mouseout"
     )
 
@@ -145,7 +145,7 @@ def make_chart(df, col, title, color):
         opacity=alt.condition(nearest, alt.value(0.6), alt.value(0))
     )
 
-    highlight = base.mark_point(size=60, color=color).encode(
+    highlight = base.mark_point(size=70, color=color).encode(
         opacity=alt.condition(nearest, alt.value(1), alt.value(0))
     )
 
@@ -154,12 +154,8 @@ def make_chart(df, col, title, color):
         dx=10,
         dy=-10
     ).encode(
-        text=alt.condition(
-            nearest,
-            alt.Text(f"{col}:Q", format=".3f"),
-            alt.value("")
-        )
-    )
+        text=alt.Text(f"{col}:Q", format=".3f")
+    ).transform_filter(nearest)
 
     return (line + hover_points + crosshair + highlight + tooltip).properties(
         height=240,
@@ -181,7 +177,7 @@ with g2:
     st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"),
                     use_container_width=True)
 
-# ---------------- DAILY METRICS ----------------
+# ---------------- DAILY ----------------
 st.write("---")
 
 daily_energy = float(daily.iloc[0]["total_energy"] or 0)
@@ -190,24 +186,16 @@ daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
 m1, m2 = st.columns(2)
 
 m1.markdown(f"""
-<div style="
-    text-align:center;
-    padding:16px;
-    border-radius:10px;
-    background:rgba(2,62,138,0.08);
-">
+<div style="text-align:center; padding:16px; border-radius:10px;
+background:rgba(2,62,138,0.08);">
 <h4>Today's Energy</h4>
 <h2 style="color:#023e8a;">{daily_energy:.4f} Wh</h2>
 </div>
 """, unsafe_allow_html=True)
 
 m2.markdown(f"""
-<div style="
-    text-align:center;
-    padding:16px;
-    border-radius:10px;
-    background:rgba(42,157,143,0.08);
-">
+<div style="text-align:center; padding:16px; border-radius:10px;
+background:rgba(42,157,143,0.08);">
 <h4>Today's Cost</h4>
 <h2 style="color:#2a9d8f;">${daily_cost:.5f}</h2>
 </div>
@@ -218,7 +206,6 @@ st.write("---")
 st.subheader("🚨 Alerts")
 
 alert_rows = []
-
 for _, row in alerts.iterrows():
     t = row["time_stamp"].strftime("%Y/%m/%d %H:%M:%S")
     msg = row["description"]
@@ -239,7 +226,6 @@ st.dataframe(
 
 # ---------------- DOWNLOAD ----------------
 st.write("---")
-st.subheader("📥 Download Data (24h)")
 
 download_df = conn.query("""
     SELECT timestamp, voltage, current, power, total_energy
