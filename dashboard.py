@@ -208,6 +208,24 @@ st.dataframe(
     hide_index=True
 )
 
+# ---------------- DOWNLOAD ----------------
+st.write("---")
+st.subheader("📥 Download Data (24h)")
+
+download_df = conn.query("""
+    SELECT timestamp, voltage, current, power, total_energy
+    FROM public.readings
+    WHERE timestamp >= NOW() - INTERVAL '24 hours'
+    ORDER BY timestamp ASC;
+""", ttl=10)
+
+st.download_button(
+    "Download Last 24h Data",
+    download_df.to_csv(index=False).encode(),
+    "energy_data.csv",
+    "text/csv"
+)
+
 # ---------------- REFRESH ----------------
 time.sleep(1)
 st.rerun()
