@@ -100,41 +100,44 @@ def make_chart(df, col, title, color):
 
     line = base.mark_line(color=color)
 
-    # nearest hover selector
     nearest = alt.selection_point(
+        name="hover",
+        fields=["timestamp"],
         nearest=True,
         on="mouseover",
-        fields=["timestamp"],
-        empty="none"
+        empty=False,
+        clear="mouseout"
     )
 
-    # invisible hover anchors
-    selectors = base.mark_point(opacity=0).add_params(nearest)
+    hover_points = base.mark_point(opacity=0).add_params(nearest)
 
-    # vertical crosshair line
-    rule = base.mark_rule(color="gray").encode(
+    crosshair = base.mark_rule(color="gray").encode(
         opacity=alt.condition(nearest, alt.value(0.6), alt.value(0))
     )
 
-    # highlighted point
-    points = base.mark_point(size=60, color=color).transform_filter(nearest)
+    highlight = base.mark_point(size=60, color=color).encode(
+        opacity=alt.condition(nearest, alt.value(1), alt.value(0))
+    )
 
-    # tooltip text (clean, always visible on hover)
-    text = base.mark_text(
+    tooltip = base.mark_text(
         align="left",
         dx=10,
-        dy=-10,
-        color="white"
+        dy=-10
     ).encode(
-        text=alt.Text(f"{col}:Q", format=".3f")
-    ).transform_filter(nearest)
+        text=alt.condition(
+            nearest,
+            alt.Text(f"{col}:Q", format=".3f"),
+            alt.value("")
+        )
+    )
 
-    chart = (line + selectors + rule + points + text).properties(
+    chart = (
+        line + hover_points + crosshair + highlight + tooltip
+    ).properties(
         height=240,
         title=title
     )
 
-    # IMPORTANT: disables zoom, pan, box select, menu junk
     return chart
 
 # ---------------- GRAPHS ----------------
