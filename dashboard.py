@@ -34,6 +34,19 @@ for i, key in enumerate(WINDOWS.keys()):
 selected = st.session_state.time_window
 window = WINDOWS[selected]
 
+# ---------------- AXIS FORMAT LOGIC ----------------
+def axis_format(window_key):
+    if window_key in ["5m", "15m"]:
+        return "%H:%M:%S"
+    elif window_key == "1h":
+        return "%H:%M"
+    elif window_key == "6h":
+        return "%H:%M"
+    else:
+        return "%Y/%m/%d"
+
+axis_fmt = axis_format(selected)
+
 # ---------------- DATA FETCH ----------------
 try:
     readings = conn.query(f"""
@@ -84,51 +97,44 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# ---------------- CHART CORE ----------------
+# ---------------- CHART ENGINE ----------------
 def make_chart(df, col, title, color):
-    base = alt.Chart(df).encode(
-        x=alt.X(
-            "timestamp:T",
-            title=None,
-            axis=alt.Axis(format="%Y/%m/%d %H:%M:%S")
-        ),
-        y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
-    )
-
-    line = base.mark_line(color=color)
-
-    nearest = alt.selection_point(
+    selection = alt.selection_point(
         nearest=True,
         on="mouseover",
         fields=["timestamp"],
         empty=False
     )
 
-    selectors = base.mark_point(opacity=0).add_params(nearest)
+    base = alt.Chart(df).encode(
+        x=alt.X(
+            "timestamp:T",
+            title=None,
+            axis=alt.Axis(format=axis_fmt)
+        ),
+        y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
+    )
 
-    rule = base.mark_rule(color="gray").transform_filter(nearest)
+    line = base.mark_line(color=color)
 
-    points = base.mark_point(size=60, color=color).transform_filter(nearest)
+    rule = base.mark_rule(color="gray").transform_filter(selection)
 
-    text = base.mark_text(
-        align="left",
-        dx=10,
-        dy=-10
-    ).encode(
-        text=f"{col}:Q"
-    ).transform_filter(nearest)
+    points = base.mark_point(size=60, color=color).transform_filter(selection)
+
+    tooltip = base.mark_rule().encode(
+        tooltip=[
+            alt.Tooltip("timestamp:T", format="%Y/%m/%d %H:%M:%S"),
+            alt.Tooltip(f"{col}:Q", format=".4f")
+        ]
+    ).transform_filter(selection)
 
     chart = (
-        line + selectors + rule + points + text
-    ).properties(
-        height=240,
-        title=title
-    ).interactive()
+        line + rule + points + tooltip
+    ).add_params(selection)
 
-    # IMPORTANT: removes table + menu
-    return chart.to_dict()
+    return chart.properties(height=240, title=title).configure_view(stroke=None).to_dict()
 
-# ---------------- GRAPHS (NO TABLE VIEW) ----------------
+# ---------------- GRAPHS ----------------
 g1, g2 = st.columns(2)
 
 with g1:
@@ -181,7 +187,7 @@ m2.markdown(f"""
 st.write("---")
 st.subheader("🚨 Alerts")
 
-alert_rows = []
+rows = []
 
 for _, row in alerts.iterrows():
     t = row["time_stamp"].strftime("%Y/%m/%d %H:%M:%S")
@@ -190,9 +196,9 @@ for _, row in alerts.iterrows():
     if len(msg) > 80:
         msg = msg[:80] + "..."
 
-    alert_rows.append([f"{t} — {msg}"])
+    rows.append([f"{t} — {msg}"])
 
-alerts_df = pd.DataFrame(alert_rows, columns=["Alert"])
+alerts_df = pd.DataFrame(rows, columns=["Alert"])
 
 st.dataframe(
     alerts_df,
