@@ -10,7 +10,7 @@ st.title("⚡ Live Energy Monitor Dashboard")
 
 conn = st.connection("neon", type="sql")
 
-# IMPORTANT: removes Altair row limits (prevents weird truncation/lag behavior)
+# 🔥 IMPORTANT: prevents Altair silent rendering limits
 alt.data_transformers.disable_max_rows()
 
 # ---------------- STATE ----------------
@@ -91,7 +91,7 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# ---------------- IMPROVED CHART ----------------
+# ---------------- CHART (STABLE + HOVER FIXED) ----------------
 def make_chart(df, col, title, color):
 
     base = alt.Chart(df).encode(
@@ -107,7 +107,6 @@ def make_chart(df, col, title, color):
 
     line = base.mark_line(color=color)
 
-    # TRUE "nearest hover" crosshair system
     nearest = alt.selection_point(
         fields=["timestamp"],
         nearest=True,
@@ -115,11 +114,11 @@ def make_chart(df, col, title, color):
         empty="none"
     )
 
-    rule = base.mark_rule(color="gray").encode(
-        opacity=alt.condition(nearest, alt.value(0.5), alt.value(0))
-    )
+    points = base.mark_point(opacity=0, size=0).add_params(nearest)
 
-    points = base.mark_point(size=0).add_params(nearest)
+    rule = base.mark_rule(color="gray").encode(
+        opacity=alt.condition(nearest, alt.value(0.6), alt.value(0))
+    )
 
     tooltip = base.mark_point(opacity=0).encode(
         tooltip=[
@@ -147,8 +146,10 @@ with g2:
 # ---------------- DAILY METRICS ----------------
 st.write("---")
 
-daily_energy = float(daily.iloc[0]["total_energy"] or 0)
-daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
+daily_energy_wh = float(daily.iloc[0]["total_energy"] or 0)
+
+daily_kwh = daily_energy_wh / 1000.0
+daily_cost = daily_kwh * RATE_PER_KWH
 
 m1, m2 = st.columns(2)
 
@@ -160,7 +161,7 @@ m1.markdown(f"""
     background:rgba(2,62,138,0.08);
 ">
 <h4>Today's Energy</h4>
-<h2 style="color:#023e8a;">{daily_energy:.4f} Wh</h2>
+<h2 style="color:#023e8a;">{daily_energy_wh:.4f} Wh</h2>
 </div>
 """, unsafe_allow_html=True)
 
@@ -176,7 +177,7 @@ m2.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- ALERTS (CLEAN TABLE) ----------------
+# ---------------- ALERTS ----------------
 st.write("---")
 st.subheader("🚨 Alerts")
 
@@ -217,6 +218,6 @@ st.download_button(
     "text/csv"
 )
 
-# ---------------- AUTO REFRESH ----------------
+# ---------------- REFRESH LOOP ----------------
 time.sleep(1)
 st.rerun()
