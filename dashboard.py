@@ -37,28 +37,28 @@ interval_sql = time_map[st.session_state.time_window]
 try:
     readings = conn.query(f"""
         SELECT timestamp, voltage, current, power, total_energy
-        FROM readings
+        FROM public.readings
         WHERE timestamp >= NOW() - {interval_sql}
         ORDER BY timestamp ASC;
     """, ttl=1)
 
     latest = conn.query("""
         SELECT voltage, current, power, total_energy
-        FROM readings
+        FROM public.readings
         ORDER BY timestamp DESC
         LIMIT 1;
     """, ttl=1)
 
     alerts = conn.query("""
         SELECT id, description, time_stamp
-        FROM alerts
+        FROM public.alerts
         ORDER BY time_stamp DESC
         LIMIT 50;
     """, ttl=5)
 
     daily = conn.query("""
         SELECT total_energy
-        FROM readings
+        FROM public.readings
         WHERE DATE(timestamp) = CURRENT_DATE
         ORDER BY timestamp DESC
         LIMIT 1;
@@ -156,7 +156,7 @@ st.write("---")
 
 download_df = conn.query("""
     SELECT r.timestamp, r.voltage, r.current, r.power, r.total_energy
-    FROM readings r
+    FROM public.readings r
     WHERE timestamp >= NOW() - INTERVAL '24 hours'
     ORDER BY timestamp ASC;
 """, ttl=10)
