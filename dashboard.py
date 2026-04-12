@@ -27,11 +27,7 @@ cols = st.columns(len(WINDOWS))
 
 for i, key in enumerate(WINDOWS.keys()):
     active = st.session_state.time_window == key
-    if cols[i].button(
-        key,
-        use_container_width=True,
-        type="primary" if active else "secondary"
-    ):
+    if cols[i].button(key, use_container_width=True, type="primary" if active else "secondary"):
         st.session_state.time_window = key
         st.rerun()
 
@@ -88,39 +84,73 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# ---------------- CHART (FIXED INTERACTION) ----------------
+# ---------------- FIXED CHART (NEAREST + CROSSHAIR) ----------------
 def make_chart(df, col, title, color):
-    return (
-        alt.Chart(df)
-        .mark_line(color=color)
-        .encode(
-            x=alt.X(
-                "timestamp:T",
-                axis=alt.Axis(
-                    title=None,
-                    format="%H:%M"  # clean axis: adaptive enough for dashboards
-                )
-            ),
-            y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False)),
-            tooltip=[
-                alt.Tooltip("timestamp:T", title="Time", format="%Y/%m/%d %H:%M:%S"),
-                alt.Tooltip(f"{col}:Q", title=title)
-            ]
-        )
-        .interactive()  # disables junk + improves hover behavior slightly
-        .properties(height=240, title=title)
+
+    base = alt.Chart(df).encode(
+        x=alt.X(
+            "timestamp:T",
+            axis=alt.Axis(
+                title=None,
+                format="%Y/%m/%d %H:%M:%S"
+            )
+        ),
+        y=alt.Y(f"{col}:Q", scale=alt.Scale(zero=False))
     )
+
+    line = base.mark_line(color=color)
+
+    # nearest hover selector
+    nearest = alt.selection_point(
+        nearest=True,
+        on="mouseover",
+        fields=["timestamp"],
+        empty="none"
+    )
+
+    # invisible hover anchors
+    selectors = base.mark_point(opacity=0).add_params(nearest)
+
+    # vertical crosshair line
+    rule = base.mark_rule(color="gray").encode(
+        opacity=alt.condition(nearest, alt.value(0.6), alt.value(0))
+    )
+
+    # highlighted point
+    points = base.mark_point(size=60, color=color).transform_filter(nearest)
+
+    # tooltip text (clean, always visible on hover)
+    text = base.mark_text(
+        align="left",
+        dx=10,
+        dy=-10,
+        color="white"
+    ).encode(
+        text=alt.Text(f"{col}:Q", format=".3f")
+    ).transform_filter(nearest)
+
+    chart = (line + selectors + rule + points + text).properties(
+        height=240,
+        title=title
+    )
+
+    # IMPORTANT: disables zoom, pan, box select, menu junk
+    return chart
 
 # ---------------- GRAPHS ----------------
 g1, g2 = st.columns(2)
 
 with g1:
-    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"), use_container_width=True)
-    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"), use_container_width=True)
+    st.altair_chart(make_chart(readings, "voltage", "Voltage (V)", "#7eb451"),
+                    use_container_width=True)
+    st.altair_chart(make_chart(readings, "power", "Power (W)", "#ff4b4b"),
+                    use_container_width=True)
 
 with g2:
-    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"), use_container_width=True)
-    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"), use_container_width=True)
+    st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"),
+                    use_container_width=True)
+    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"),
+                    use_container_width=True)
 
 # ---------------- DAILY METRICS ----------------
 st.write("---")
@@ -154,7 +184,7 @@ m2.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- ALERTS (FIXED + CLEAN) ----------------
+# ---------------- ALERTS ----------------
 st.write("---")
 st.subheader("🚨 Alerts")
 
@@ -174,27 +204,10 @@ alerts_df = pd.DataFrame(alert_rows, columns=["Alert"])
 st.dataframe(
     alerts_df,
     use_container_width=True,
-    height=180,   # scroll container
+    height=180,
     hide_index=True
 )
 
-# ---------------- DOWNLOAD ----------------
-st.write("---")
-
-download_df = conn.query("""
-    SELECT timestamp, voltage, current, power, total_energy
-    FROM public.readings
-    WHERE timestamp >= NOW() - INTERVAL '24 hours'
-    ORDER BY timestamp ASC;
-""", ttl=10)
-
-st.download_button(
-    "Download Last 24h Data",
-    download_df.to_csv(index=False).encode(),
-    "energy_data.csv",
-    "text/csv"
-)
-
-# ---------------- REFRESH LOOP ----------------
+# ---------------- REFRESH ----------------
 time.sleep(1)
 st.rerun()
