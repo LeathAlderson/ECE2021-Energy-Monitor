@@ -12,44 +12,46 @@ conn = st.connection("neon", type="sql")
 
 # --- SESSION STATE ---
 if "time_window" not in st.session_state:
-    st.session_state.time_window = "24h"  # FIXED DEFAULT
+    st.session_state.time_window = "15m"
 
-time_map = {
-    "5m": "INTERVAL '5 minutes'",
-    "15m": "INTERVAL '15 minutes'",
-    "1h": "INTERVAL '1 hour'",
-    "6h": "INTERVAL '6 hours'",
-    "24h": "INTERVAL '24 hours'"
+# --- INTERVAL MAP (AGGREGATION, NOT FILTERING) ---
+bucket_map = {
+    "5m": "5 minutes",
+    "15m": "15 minutes",
+    "1h": "1 hour",
+    "6h": "6 hours",
+    "24h": "1 day"
 }
 
-# --- TIME SELECTOR ---
-cols = st.columns(len(time_map))
-for i, key in enumerate(time_map.keys()):
-    if cols[i].button(key, use_container_width=True):
+# --- BUTTONS WITH ACTIVE STATE ---
+cols = st.columns(len(bucket_map))
+for i, key in enumerate(bucket_map.keys()):
+    active = st.session_state.time_window == key
+    if cols[i].button(
+        key,
+        use_container_width=True,
+        type="primary" if active else "secondary"
+    ):
         st.session_state.time_window = key
+        st.rerun()
 
-interval_sql = time_map[st.session_state.time_window]
+bucket = bucket_map[st.session_state.time_window]
 
 # --- QUERY ---
 try:
-    # GRAPH DATA ONLY (time filtered)
     readings = conn.query(f"""
-        SELECT timestamp, voltage, current, power, total_energy
+        SELECT 
+            date_trunc('{bucket}', timestamp) as bucket_time,
+            AVG(voltage) as voltage,
+            AVG(current) as current,
+            AVG(power) as power,
+            MAX(total_energy) as total_energy
         FROM public.readings
-        WHERE timestamp >= NOW() - {interval_sql}
-        ORDER BY timestamp ASC;
+        WHERE timestamp >= NOW() - INTERVAL '24 hours'
+        GROUP BY bucket_time
+        ORDER BY bucket_time ASC;
     """, ttl=1)
 
-    # FALLBACK if empty (fixes your "waiting forever" issue)
-    if readings.empty:
-        readings = conn.query("""
-            SELECT timestamp, voltage, current, power, total_energy
-            FROM public.readings
-            ORDER BY timestamp DESC
-            LIMIT 200;
-        """, ttl=1).iloc[::-1]
-
-    # ALWAYS AVAILABLE DATA (not filtered)
     latest = conn.query("""
         SELECT voltage, current, power, total_energy
         FROM public.readings
@@ -65,11 +67,9 @@ try:
     """, ttl=5)
 
     daily = conn.query("""
-        SELECT total_energy
+        SELECT MAX(total_energy) as total_energy
         FROM public.readings
-        WHERE DATE(timestamp) = CURRENT_DATE
-        ORDER BY timestamp DESC
-        LIMIT 1;
+        WHERE DATE(timestamp) = CURRENT_DATE;
     """, ttl=2)
 
 except Exception as e:
@@ -81,9 +81,8 @@ if latest.empty:
     st.stop()
 
 # --- FORMAT ---
-readings["timestamp"] = pd.to_datetime(readings["timestamp"])
+readings["bucket_time"] = pd.to_datetime(readings["bucket_time"])
 alerts["time_stamp"] = pd.to_datetime(alerts["time_stamp"])
-
 latest = latest.iloc[0]
 
 # --- LIVE METRICS ---
@@ -94,13 +93,14 @@ c3.metric("Power", f"{latest['power']:.2f} W")
 
 st.write("---")
 
-# --- CHART ---
+# --- CHART FUNCTION ---
 def make_chart(df, col, title, color):
     return alt.Chart(df).mark_line(color=color).encode(
-        x=alt.X('timestamp:T', title="Time"),
+        x=alt.X('bucket_time:T', title="Time"),
         y=alt.Y(f'{col}:Q', scale=alt.Scale(zero=False))
     ).properties(height=250, title=title)
 
+# --- GRAPHS ---
 g1, g2 = st.columns(2)
 
 with g1:
@@ -114,7 +114,7 @@ with g2:
 # --- DAILY METRICS ---
 st.write("---")
 
-daily_energy = float(daily.iloc[0]["total_energy"]) if not daily.empty else 0.0
+daily_energy = float(daily.iloc[0]["total_energy"]) if not daily.empty and daily.iloc[0]["total_energy"] else 0.0
 daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
 
 m1, m2 = st.columns(2)
@@ -133,25 +133,42 @@ m2.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- ALERTS (CLEAN + SMALL + SCROLL) ---
+# --- ALERTS ---
 st.write("---")
 st.subheader("🚨 Alerts")
 
 st.markdown("""
-<div style="max-height:200px; overflow-y:auto; border:1px solid rgba(255,255,255,0.1); padding:10px; border-radius:8px;">
+<div style="
+    max-height:180px;
+    overflow-y:auto;
+    border:1px solid rgba(255,255,255,0.1);
+    border-radius:8px;
+    padding:8px;
+    background-color: rgba(255,255,255,0.02);
+">
 """, unsafe_allow_html=True)
 
 for _, row in alerts.iterrows():
-    msg = row["description"][:60] + ("..." if len(row["description"]) > 60 else "")
+    msg = row["description"][:50] + ("..." if len(row["description"]) > 50 else "")
     time_str = row["time_stamp"].strftime("%H:%M:%S")
 
     cols = st.columns([8,1])
     with cols[0]:
-        st.markdown(f"<small style='color:gray'>{time_str}</small> — {msg}", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:13px;'>"
+            f"<span style='color:#888'>{time_str}</span> — {msg}"
+            f"</div>",
+            unsafe_allow_html=True
+        )
     with cols[1]:
         if st.button("✕", key=f"del_{row['id']}"):
-            conn.query(f"DELETE FROM public.alerts WHERE id = '{row['id']}'", ttl=0)
-            st.rerun()
+            try:
+                with conn.session as s:
+                    s.execute(f"DELETE FROM public.alerts WHERE id = '{row['id']}'")
+                    s.commit()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Delete failed: {e}")
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -174,3 +191,4 @@ st.download_button(
 
 # --- REFRESH ---
 time.sleep(1)
+st.rerun()
