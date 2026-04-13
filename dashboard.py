@@ -98,7 +98,7 @@ if not live_df.empty:
 
     with g2:
         st.altair_chart(make_chart(display_df, 'current', 'Current (A)', '#fb8500'), use_container_width=True)
-        st.altair_chart(make_chart(display_df, 'total_energy', 'Energy per Reading (Wh)', '#023e8a'), use_container_width=True)
+        st.altair_chart(make_chart(display_df, 'total_energy', 'Energy per Reading (kWh)', '#023e8a'), use_container_width=True)
 
     # --- ENERGY + COST (CORRECT AGGREGATION) ---
     total_energy_wh = live_df['total_energy'].sum()
