@@ -3,11 +3,13 @@ import pandas as pd
 import altair as alt
 import time
 
+RATE_PER_KWH = 0.15  # cost rate
+
 # --- Page Setup ---
 st.set_page_config(page_title="Live Energy Monitor", layout="wide")
 st.title("⚡ Live Energy Monitor Dashboard")
 
-# --- Helper Function ---
+# --- Chart Helper ---
 def make_chart(data, y_col, title, color):
     return alt.Chart(data).mark_line(color=color).encode(
         x=alt.X('timestamp:T', title="Time"),
@@ -23,7 +25,7 @@ def make_chart(data, y_col, title, color):
         strokeWidth=0
     )
 
-# --- Neon Database Connection ---
+# --- DB Connection ---
 conn = st.connection("neon", type="sql")
 
 try:
@@ -34,10 +36,11 @@ try:
         ORDER BY timestamp DESC;
     """, ttl="0s")
 
-    all_alerts_df = conn.query("""
+    alerts_df = conn.query("""
         SELECT description, time_stamp
         FROM public.alerts
-        ORDER BY time_stamp DESC;
+        ORDER BY time_stamp DESC
+        LIMIT 50;
     """, ttl="0s")
 
 except Exception as e:
@@ -45,28 +48,28 @@ except Exception as e:
     st.stop()
 
 if not live_df.empty:
-    
+
     # --- Timezone Fix ---
-    for df, col in [(live_df, 'timestamp'), (all_alerts_df, 'time_stamp')]:
+    for df, col in [(live_df, 'timestamp'), (alerts_df, 'time_stamp')]:
         if not df.empty:
             df[col] = pd.to_datetime(df[col]).dt.tz_convert('America/Moncton')
 
-    # Reverse for charting
+    # Reverse for charts
     chart_df = live_df.iloc[::-1]
-    latest_reading = live_df.iloc[0]
+    latest = live_df.iloc[0]
 
-    # --- 1. LIVE METRICS ---
+    # --- LIVE METRICS ---
     c1, c2, c3 = st.columns(3)
-    c1.metric("Live Voltage", f"{latest_reading['voltage']:.2f} V")
-    c2.metric("Live Current", f"{latest_reading['current']:.2f} A")
-    c3.metric("Live Power", f"{latest_reading['power']:.2f} W")
+    c1.metric("Live Voltage", f"{latest['voltage']:.2f} V")
+    c2.metric("Live Current", f"{latest['current']:.2f} A")
+    c3.metric("Live Power", f"{latest['power']:.2f} W")
 
     st.write("---")
 
-    # --- 2. TIME WINDOW CONTROLS ---
+    # --- TIME WINDOW ---
     if 'time_window' not in st.session_state:
         st.session_state.time_window = "15 Minutes"
-            
+
     time_options = {
         "5 Minutes": 5,
         "15 Minutes": 15,
@@ -76,7 +79,6 @@ if not live_df.empty:
     }
 
     cols = st.columns(len(time_options))
-    
     for i, opt in enumerate(time_options.keys()):
         btn_color = "primary" if st.session_state.time_window == opt else "secondary"
         if cols[i].button(opt, type=btn_color, use_container_width=True):
@@ -84,10 +86,10 @@ if not live_df.empty:
             st.rerun()
 
     mins_back = time_options[st.session_state.time_window]
-    cutoff_time = chart_df['timestamp'].max() - pd.Timedelta(minutes=mins_back)
-    display_df = chart_df[chart_df['timestamp'] >= cutoff_time]
+    cutoff = chart_df['timestamp'].max() - pd.Timedelta(minutes=mins_back)
+    display_df = chart_df[chart_df['timestamp'] >= cutoff]
 
-    # --- 3. GRAPHS ---
+    # --- GRAPHS ---
     g1, g2 = st.columns(2)
 
     with g1:
@@ -96,42 +98,51 @@ if not live_df.empty:
 
     with g2:
         st.altair_chart(make_chart(display_df, 'current', 'Current (A)', '#fb8500'), use_container_width=True)
-        st.altair_chart(make_chart(display_df, 'total_energy', 'Total Energy Logged (Wh)', '#023e8a'), use_container_width=True)
+        st.altair_chart(make_chart(display_df, 'total_energy', 'Energy per Reading (Wh)', '#023e8a'), use_container_width=True)
 
-    # --- 4. SUMMARY ---
+    # --- ENERGY + COST (CORRECT AGGREGATION) ---
+    total_energy_wh = live_df['total_energy'].sum()
+    total_energy_kwh = total_energy_wh / 1000.0
+    cost = total_energy_kwh * RATE_PER_KWH
+
     st.write("---")
-    m1 = st.columns(1)[0]
+    m1, m2 = st.columns(2)
 
     m1.markdown(f"""
         <div style="text-align: center; padding: 20px; background-color: rgba(2, 62, 138, 0.1); border-radius: 10px;">
-            <h3 style="margin-bottom: 0px;">Total Energy Logged</h3>
-            <h1 style="color: #023e8a; font-size: 3rem; margin-top: 10px;">
-                {latest_reading['total_energy']:.4f} Wh
-            </h1>
+            <h3>Total Energy (Last 24h)</h3>
+            <h1 style="color:#023e8a;">{total_energy_wh:.4f} Wh</h1>
         </div>
     """, unsafe_allow_html=True)
 
-    # --- 5. ALERT TABLE ---
+    m2.markdown(f"""
+        <div style="text-align: center; padding: 20px; background-color: rgba(42, 157, 143, 0.1); border-radius: 10px;">
+            <h3>Total Cost (Last 24h)</h3>
+            <h1 style="color:#2a9d8f;">${cost:.4f}</h1>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # --- ALERTS (CODE 1 STYLE) ---
     st.write("---")
-    st.subheader("🚨 Warning & Alert History")
+    st.subheader("🚨 Alerts")
 
-    if not all_alerts_df.empty:
-        alrt_disp = all_alerts_df.copy()
-        alrt_disp['time_stamp'] = alrt_disp['time_stamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-        alrt_disp.columns = ['Alert Message', 'Time Detected']
+    alert_rows = [
+        [f"{r['time_stamp'].strftime('%Y/%m/%d %H:%M:%S')} — {r['description'][:80]}"]
+        for _, r in alerts_df.iterrows()
+    ]
 
-        st.dataframe(alrt_disp, use_container_width=True, hide_index=True)
-    else:
-        st.success("No alerts found in the database.")
+    simple_alerts = pd.DataFrame(alert_rows, columns=["Alert"])
 
-    # --- 6. DOWNLOAD ---
+    st.dataframe(simple_alerts, use_container_width=True, height=180, hide_index=True)
+
+    # --- DOWNLOAD ---
     st.write("---")
     st.subheader("📥 Export 24h Data")
 
     st.download_button(
-        "Download Telemetry (CSV)", 
-        live_df.to_csv(index=False).encode('utf-8'), 
-        f"telemetry_{time.strftime('%Y%m%d_%H%M%S')}.csv", 
+        "Download Telemetry (CSV)",
+        live_df.to_csv(index=False).encode('utf-8'),
+        f"telemetry_{time.strftime('%Y%m%d_%H%M%S')}.csv",
         "text/csv",
         use_container_width=True
     )
@@ -139,6 +150,6 @@ if not live_df.empty:
 else:
     st.info("Waiting for data in the 'readings' table...")
 
-# --- Auto Refresh ---
+# --- AUTO REFRESH ---
 time.sleep(2)
 st.rerun()
