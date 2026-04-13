@@ -94,6 +94,9 @@ nan_rows = pd.DataFrame({
 readings = pd.concat([readings, nan_rows], ignore_index=True)
 readings = readings.sort_values("timestamp")
 
+# ---------------- ENERGY CUMULATIVE SUM ----------------
+readings["energy_cumulative"] = readings["total_energy"].fillna(0).cumsum()
+
 # ---------------- DAILY ----------------
 daily_energy = float(daily.iloc[0]["total_energy"] or 0)
 daily_cost = (daily_energy / 1000.0) * RATE_PER_KWH
@@ -148,7 +151,7 @@ with g1:
 
 with g2:
     st.altair_chart(make_chart(readings, "current", "Current (A)", "#fb8500"), use_container_width=True)
-    st.altair_chart(make_chart(readings, "total_energy", "Energy (Wh)", "#023e8a"), use_container_width=True)
+    st.altair_chart(make_chart(readings, "energy_cumulative", "Energy (Wh) (Cumulative)", "#023e8a"), use_container_width=True)
 
 # ---------------- DAILY ----------------
 st.write("---")
