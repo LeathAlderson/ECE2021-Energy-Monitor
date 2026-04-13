@@ -68,7 +68,7 @@ if not live_df.empty:
 
     # --- TIME WINDOW ---
     if 'time_window' not in st.session_state:
-        st.session_state.time_window = "15 Minutes"
+        st.session_state.time_window = "1 Hour"
 
     time_options = {
         "5 Minutes": 5,
